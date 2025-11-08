@@ -1,0 +1,8 @@
+investment:
+  symbols: ["SPY"]
+
+schedule:
+  timezone: "America/New_York"
+  strategy: "0 17 * * 1-5"
+  data_collection: "0 */4 * * *"
+  backup: "0 2 * * *"

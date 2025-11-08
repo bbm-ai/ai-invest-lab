@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+.envrc
+
+# Environment & secrets
+.env
+*.key
+*.pem
+
+# SQLite & data artifacts
+data/*.sqlite3
+data/*.db
+data/*-journal
+
+# Reports / generated artifacts
+reports/*.md
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

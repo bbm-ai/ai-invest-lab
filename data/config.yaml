@@ -1,0 +1,12 @@
+# 全域設定
+timezone: America/New_York
+data_dir: data
+output_dir: data/outputs
+
+# 任務排程（cron 標準語法）
+schedules:
+  daily_strategy: "0 17 * * 1-5"   # 平日 17:00 紐約時間
+  weekly_report: "0 10 * * 1"     # 週一 10:00 紐約時間
+
+# 交易標的預設
+tickers: ["QQQ", "SPY"]

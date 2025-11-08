@@ -6,7 +6,7 @@
 - [x] **T01** 環境設定（Day 1） — *2025-11-08 完成*
 - [x] **T02** 數據庫設計（Day 2） — *2025-11-08 完成*
 - [ ] **T03** Agent 抽象類（Day 3）
-- [ ] **T04** Data Collector (I) — 價量（Day 4）
+- [x] **T04** Data Collector (I) 價量資料（Day 4） — *2025-11-08 完成*
 - [ ] **T05** Data Collector (II) — 新聞（Day 5）
 - [ ] **T06** Master Agent（Day 6）
 - [ ] **T07** Milestone 1 驗收（Day 7）

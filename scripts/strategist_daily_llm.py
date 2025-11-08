@@ -1,16 +1,27 @@
 #!/usr/bin/env python
+# Day 12+13 — Strategist：先按 APIRouter 推理；若低置信度/衝突→依政策升級到 Claude（含 cap 與總開關）
+
 import sys, pathlib, sqlite3, yaml, datetime as dt, os, json, re
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 from textwrap import shorten
 from src.utils.env import load_env
-from src.api_router import route
+from src.api_router import route, escalate_to_claude
 from src.llm_clients.groq_client import GroqClient
 from src.llm_clients.gemini_client import GeminiClient
+from src.llm_clients.claude_client import ClaudeClient
+from src.router_policies import should_use_claude
+import yaml as _yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DB = ROOT / "data" / "ai_invest.sqlite3"
 DATA = ROOT / "data"
+CONFIG = ROOT / "config.yaml"
+
+def load_cfg():
+    if CONFIG.exists():
+        return _yaml.safe_load(CONFIG.read_text(encoding="utf-8")) or {}
+    return {}
 
 def avg_sentiment(con, day: str) -> float:
     cur = con.cursor()
@@ -40,28 +51,13 @@ def fallback_rule(symbol: str, s_avg: float, tech: dict):
     score += (1.0 if hist > 0 else -1.0 if hist < 0 else 0.0) * 0.3
     score += (s_avg) * 0.1
     score = max(-1.0, min(1.0, score))
-    if score > 0.15: rec = "BUY"
-    elif score < -0.15: rec = "SELL"
-    else: rec = "HOLD"
+    rec = "BUY" if score > 0.15 else ("SELL" if score < -0.15 else "HOLD")
     confidence = abs(score)
     pos = round(min(1.0, max(0.0, 0.2 + 0.6*confidence)), 2) if rec != "HOLD" else 0.0
-    reasoning = f"Rule-based: RSI={rsi:.1f}, MACD_hist={hist:.3f}, mkt_sent={s_avg:.2f} → score={score:.2f}."
+    reasoning = f"Rule-based: RSI={rsi:.1f}, MACD_hist={hist:.3f}, mkt_sent={s_avg:.2f}."
     return rec, reasoning, pos, round(confidence, 2)
 
-def llm_strategy(symbol: str, day: str, s_avg: float, tech: dict):
-    load_env()
-    d = route("strategy_synthesis")
-    groq = GroqClient(os.getenv("GROQ_API_KEY"))
-    gemi = GeminiClient(os.getenv("GEMINI_API_KEY"))
-    prompt = (
-        f"Today={day}. Symbol={symbol}. Inputs: avg_sentiment={s_avg:.2f}, RSI14={tech.get('rsi_14')}, "
-        f"MACD_hist={tech.get('macd_hist')}, trend={tech.get('trend_label')}\n"
-        "Return a concise JSON with keys: recommendation ('BUY'|'SELL'|'HOLD'), reasoning (<=40 words), position_size (0..1), confidence (0..1)."
-    )
-    out = groq.summarize(prompt, model=d.model, timeout=15.0) if d.provider == "groq" else gemi.analyze(prompt, model=d.model, timeout=15.0)
-    if out.get("status") != "OK":
-        return None
-    text = out.get("output","");
+def _parse_llm_json(text: str):
     m = re.search(r"\{.*\}", text, flags=re.S)
     if not m: return None
     try:
@@ -70,10 +66,27 @@ def llm_strategy(symbol: str, day: str, s_avg: float, tech: dict):
         reasoning = shorten(js.get("reasoning") or "", width=200, placeholder="…")
         pos = float(js.get("position_size") or 0.0)
         conf = float(js.get("confidence") or 0.0)
-        pos = max(0.0, min(1.0, pos)); conf = max(0.0, min(1.0, conf))
-        return rec, reasoning, pos, conf
+        return rec, reasoning, max(0.0, min(1.0, pos)), max(0.0, min(1.0, conf))
     except Exception:
         return None
+
+def llm_strategy(symbol: str, day: str, s_avg: float, tech: dict, provider: str, model: str):
+    load_env()
+    prompt = (
+        f"Today={day}. Symbol={symbol}. "
+        f"Inputs: avg_sentiment={s_avg:.2f}, RSI14={tech.get('rsi_14')}, MACD_hist={tech.get('macd_hist')}, trend={tech.get('trend_label')}.\n"
+        "Return a concise JSON with keys: recommendation ('BUY'|'SELL'|'HOLD'), reasoning (<=40 words), position_size (0..1), confidence (0..1)."
+    )
+    if provider == "groq":
+        out = GroqClient(os.getenv("GROQ_API_KEY")).summarize(prompt, model=model, timeout=15.0)
+    elif provider == "gemini":
+        out = GeminiClient(os.getenv("GEMINI_API_KEY")).analyze(prompt, model=model, timeout=15.0)
+    else:
+        out = ClaudeClient(os.getenv("ANTHROPIC_API_KEY")).analyze(prompt, model=model, timeout=15.0)
+    if out.get("status") != "OK":
+        return None, out
+    parsed = _parse_llm_json(out.get("output",""))
+    return parsed, out
 
 def ensure_table(con):
     con.execute("""CREATE TABLE IF NOT EXISTS strategies (
@@ -91,9 +104,16 @@ def ensure_table(con):
     con.commit()
 
 def run(day: str|None):
+    cfg = load_cfg()
+    enable_claude = bool(cfg.get("router", {}).get("enable_claude", False))
+    claude_model = str(cfg.get("router", {}).get("claude_model", "claude-3-5-haiku-latest"))
+    min_conf = float(cfg.get("policy", {}).get("min_conf_for_no_escalation", 0.55))
+    cap = int(cfg.get("policy", {}).get("daily_claude_call_cap", 3))
+
     if day is None:
         day = dt.date.today().isoformat()
     con = sqlite3.connect(DB); ensure_table(con)
+
     ypath = DATA / "symbols.yaml"
     if not ypath.exists():
         universe = ["SPY"]
@@ -108,14 +128,36 @@ def run(day: str|None):
         if not tech:
             print({"symbol": sym, "day": day, "error": "no tech_signals"})
             continue
-        res = llm_strategy(sym, day, s_avg, tech) or fallback_rule(sym, s_avg, tech)
+
+        d = route("strategy_synthesis")
+        res, raw = llm_strategy(sym, day, s_avg, tech, d.provider, d.model)
+        escalated = False
+
+        if not res or (res and res[3] < min_conf):  # res[3] = confidence
+            use, why = should_use_claude(
+                conf=(res[3] if res else 0.0),
+                avg_sent=s_avg,
+                trend_label=tech.get("trend_label"),
+                cap_limit=cap,
+                enable=enable_claude
+            )
+            if use:
+                d2 = escalate_to_claude(d, claude_model=claude_model)
+                res2, raw2 = llm_strategy(sym, day, s_avg, tech, d2.provider, d2.model)
+                if res2: 
+                    res = res2
+                    escalated = True
+
+        if not res:
+            res = fallback_rule(sym, s_avg, tech)
+
         rec, reasoning, pos, conf = res
         cur = con.cursor()
         cur.execute("DELETE FROM strategies WHERE date=? AND symbol=?", (day, sym))
         cur.execute("""INSERT INTO strategies(date, symbol, recommendation, reasoning, position_size, confidence, is_executed)
                       VALUES (?,?,?,?,?,?,0)""", (day, sym, rec, reasoning, pos, conf))
         upserts += 1
-        print({"symbol": sym, "rec": rec, "pos": pos, "conf": conf})
+        print({"symbol": sym, "rec": rec, "pos": pos, "conf": conf, "escalated": escalated})
     con.commit(); con.close()
     print({"strategies_upserted": upserts, "day": day})
 

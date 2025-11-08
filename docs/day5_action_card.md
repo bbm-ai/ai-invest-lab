@@ -1,23 +1,26 @@
-# 🗂 Day 5 行動卡 — T05 Data Collector (II) 新聞資料源（v2.3，先 RSS 無金鑰）
+# 🗂 Day 5 行動卡 — T05 Data Collector (II) 新聞 RSS（v2.3）
 
-**Inputs**：免費 RSS 來源清單（例如：CNBC / Reuters / WSJ Markets 的 RSS）、`news` 表結構（url_hash 唯一）  
-**Expected Outputs**：
-- 產出 `data/news/YYYY-MM-DD.jsonl`（每列一則標準化新聞）
-- 欄位：`title, source, url, url_hash, published_at, symbols[]`（先以關鍵字或簡短規則判斷對應標的）
+**Inputs**：`data/news_sources.yaml`、`scripts/collector_news_rss.py`  
+**Expected Outputs**：`data/news/2025-11-08.jsonl`（至少 20 則），欄位：`title, source, url, url_hash, published_at, symbols[]`
 
-## 步驟
-1) 準備 RSS 清單（可先 3~5 個）
-   - 例如：Reuters Business、CNBC Markets、Yahoo Finance Tickers（若可用）。
-2) 標準化欄位與去重規則
-   - `url_hash = sha256(url)`；同一天同一 `url_hash` 不重覆。
-   - 限制欄長（如 title ≤ 200 chars）；`published_at` 轉 ISO（UTC）。
-3) 先寫入 JSONL（不入庫）
-   - 路徑：`data/news/YYYY-MM-DD.jsonl`；方便調試/去重與追蹤。
-4) 驗收
-   - 檔案存在且至少 20 則；抽查無重覆 URL。
+## 套件
+```bash
+source .venv/bin/activate
+pip install feedparser pyyaml
+```
 
-## 風險提示
-- RSS 穩定度不一，先少量來源試跑；News API/GNews 等需金鑰的方案留 Day 6+。
-- 先不做 LLM，純結構化收集；Day 6 才做情緒/技術分析串接。
+## 執行
+```bash
+python scripts/collector_news_rss.py
+# 看到：{"count": N, "path": "data/news/2025-11-08.jsonl"}
+```
 
-完成後回覆「完成」，我會勾選 `T05` 並更新 `progress.md`，再發後續行動卡。
+## 驗收
+```bash
+wc -l data/news/2025-11-08.jsonl        # 行數（新聞數量）
+head -3 data/news/2025-11-08.jsonl      # 抽查欄位格式
+```
+
+## 備註
+- 去重以 `url_hash=sha256(url)`；symbols 以簡單關鍵字猜測（可再迭代）。
+- 後續 Day 6 才把 JSONL upsert 進 DB 與做情緒摘要。

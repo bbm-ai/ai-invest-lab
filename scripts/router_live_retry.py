@@ -1,12 +1,5 @@
-# ensure project root on sys.path
-import sys, pathlib, os, time
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-
-from src.api_router import route, next_best
-from src.llm_clients.groq_client import GroqClient
-from src.llm_clients.gemini_client import GeminiClient
-from src.utils.retry_backoff import retry_with_backoff
-from src.llm_costs import log_cost
+from src.utils.env import load_env
+load_env()
 
 def call_provider(dec, text):
     """回傳 (status, payload_dict, latency_ms)；status ∈ {OK, ERROR, SKIP}"""

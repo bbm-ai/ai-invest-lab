@@ -201,3 +201,10 @@
 - [x] Add `sentiments.created_at` (backfilled via migration 006)
 - [x] Streamlit chart uses `COALESCE(news.published_at, sentiments.created_at, 'now')`
 - [x] (opt) Add indexes on `sentiments.created_at`, `news.published_at` (migration 007)
+
+### 2025-11-09 — Day 20（Release 自動化）
+- [x] `make_release.sh` 內建：重新產報、打 zip、commit、標籤、上傳 GitHub Release
+- [x] 移除舊 `publish_github_release.sh`；Repository 僅保留單一入口
+- [x] `.gitignore`：忽略 `release_*.zip*`、`backups/`、`data/prices/`、`data/news/`
+- [x] README 新增 Release badge
+- [x] 驗收：`v0.3.3-milestone3` 成功釋出（含資產）

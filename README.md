@@ -1,3 +1,5 @@
+[![release](https://img.shields.io/github/v/release/bbm-ai/ai-invest-lab)](https://github.com/bbm-ai/ai-invest-lab/releases)
+
 # Day 2 Starter Kit — 快速補檔指南（v2.2, 2025-11-08)
 
 將本資料夾內容複製到你的專案根目錄 `ai-invest-lab/`：

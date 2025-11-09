@@ -196,3 +196,8 @@
 - [x] 失敗匯總：`scripts/summarize_failures_24h.sh` → `reports/day18_failures.md`
 - [x] Watchdog：`scripts/watchdog_24x7.sh`（cron/systemd 每 30 分）
 - [x] 告警：24h 內 ERROR>0 時自動 TG/Email 通知
+
+### 2025-11-09 — Data layer fix for Streamlit
+- [x] Add `sentiments.created_at` (backfilled via migration 006)
+- [x] Streamlit chart uses `COALESCE(news.published_at, sentiments.created_at, 'now')`
+- [x] (opt) Add indexes on `sentiments.created_at`, `news.published_at` (migration 007)

@@ -178,3 +178,21 @@
 - [x] Cron（`CRON_TZ=America/New_York`）於週一～週五 17:05 觸發
 - [x] 一鍵部署腳本：`scripts/deploy.sh`
 - [x] 驗收：今日策略與報表成功產生；日誌位於 `logs/daily_YYYY-MM-DD.log`
+
+### 2025-11-09 — Day 16（T16）完成
+- [x] Fault injection：`src/utils/faults.py`（環境變數 `FAULT_MODE/FAULT_PROB/FAULT_LATENCY_MS`）
+- [x] LLM 客戶端支援錯誤注入與成本記錄：`src/llm_clients/groq_client.py`, `src/llm_clients/gemini_client.py`
+- [x] 矩陣壓測：`scripts/test_failover_matrix.py`
+- [x] 一鍵總結：`scripts/chaos_failover_tests.sh` → `reports/day16_failover_summary.md`
+- [x] SQL 驗收：`llm_costs` 觀察 OK/ERROR/SKIP 與備援占比；`_tmp_summary` 彙整
+
+### 2025-11-09 — DevX 更新（自 Day 7 起）
+- [x] 啟用 **direnv**：在專案根新增 `.envrc`，自動載入 `.env`、設定 `PYTHONPATH=.` 與 `.venv/bin`。
+- [x] 互動式命令列（手動執行腳本）不再需要 `set -a` 或 `source .env`。
+- [x] systemd/cron 繼續使用 `EnvironmentFile=.env`，與 direnv 分工不衝突。
+
+### 2025-11-09 — Day 18（T18）完成
+- [x] 24h KPI 報表：`scripts/report_ops_24h.py` → `reports/day18_ops_24h.md`
+- [x] 失敗匯總：`scripts/summarize_failures_24h.sh` → `reports/day18_failures.md`
+- [x] Watchdog：`scripts/watchdog_24x7.sh`（cron/systemd 每 30 分）
+- [x] 告警：24h 內 ERROR>0 時自動 TG/Email 通知

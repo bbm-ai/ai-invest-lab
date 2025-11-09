@@ -1,0 +1,5 @@
+# symbols.yaml — 用於 Data Collector I
+universe:
+  - SPY
+  - QQQ
+  - DIA

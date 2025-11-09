@@ -13,3 +13,7 @@ sqlite3 data/ai_invest.sqlite3 '.tables'
 sqlite3 data/ai_invest.sqlite3 'PRAGMA integrity_check;'
 ```
 驗收：看到 5+ 張表、`integrity_check=ok`、`news.url_hash` 為 UNIQUE。
+
+## 🔐 環境變數載入（建議）
+- 本地互動：使用 **direnv**（在專案根 `direnv allow` 後，進入資料夾自動載入 `.env`）
+- systemd/cron：使用 `EnvironmentFile=.env`（服務與排程不依賴 direnv）

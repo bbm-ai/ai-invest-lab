@@ -1,37 +1,52 @@
-# Byte-compiled / optimized / DLL files
+# --- Python build / cache ---
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
 
-# Virtual environments
+# Virtualenv
 .venv/
-.envrc
+venv/
 
-# Environment & secrets
-.env
-*.key
-*.pem
-
-# SQLite & data artifacts
-data/*.sqlite3
-data/*.db
-data/*-journal
-
-# Reports / generated artifacts
-reports/*.md
-logs/
-*.log
-
-# OS files
+# OS junk
 .DS_Store
 Thumbs.db
-backups/
-reports/
-!reports/*.md
 
-# Releases & raw data
-release_*.zip*
+# IDE / Editor
+.vscode/
+.idea/
+
+# Direnv
+.direnv/
+.env            # keep local only
+!.envrc         # commit .envrc
+
+# Logs
+logs/*.log
+logs/*.gz
+
+# SQLite working files
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+
+# Reports & Artifacts (keep repo slim)
+reports/
 backups/
+release_*.zip*
+release_*.sha256
+
+# Raw market/news data (generated locally)
 data/prices/
 data/news/
+
+# Keep config/data manifests tracked
+!data/.gitkeep
+!data/symbols.yaml
+!data/news_sources.yaml
+
+# Node / web (if any front-end bits later)
+node_modules/
+dist/
+.env
+logs/

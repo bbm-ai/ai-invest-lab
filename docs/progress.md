@@ -172,3 +172,9 @@
 - 2025-11-08：修復 `strategist_daily_llm.py`（政策參數、`sys.path` bootstrap、情緒日期熱修）。
 - 2025-11-08：`analyst_tech_llm.py`、`004_tech_signals_extend.sql` 上線。
 - 2025-11-08：`llm_costs` 成本紀錄表與報表腳本建立。
+
+### 2025-11-09 — Day 15（T15）完成
+- [x] Systemd（使用者層級）服務：`ai-invest-lab.service` 可手動 `start` 執行日常批次
+- [x] Cron（`CRON_TZ=America/New_York`）於週一～週五 17:05 觸發
+- [x] 一鍵部署腳本：`scripts/deploy.sh`
+- [x] 驗收：今日策略與報表成功產生；日誌位於 `logs/daily_YYYY-MM-DD.log`

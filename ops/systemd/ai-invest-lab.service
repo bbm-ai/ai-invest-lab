@@ -1,0 +1,17 @@
+[Unit]
+Description=AI-Invest-Lab Daily Pipeline (oneshot)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/ai-invest-lab
+Environment=PYTHONPATH=.
+EnvironmentFile=%h/ai-invest-lab/.env
+ExecStart=%h/ai-invest-lab/scripts/run_daily_pipeline.sh
+TimeoutStartSec=1800
+Nice=10
+IOSchedulingClass=best-effort
+
+[Install]
+WantedBy=default.target

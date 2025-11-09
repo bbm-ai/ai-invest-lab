@@ -8,20 +8,12 @@ schedule:
   backup: "0 2 * * *"
 
 router:
-  enable_claude: false     # 預設關閉；要測試 Claude 時設 true
-  claude_model: "claude-3-5-haiku-latest"
+  enable_claude: true     # 預設關閉；要測試 Claude 時設 true
+  claude_model: "claude-sonnet-4-5-20250929"
 
 policy:
-  min_conf_for_no_escalation: 0.55  # 低於此值才考慮升級
-  sentiment_extreme: 0.40           # |avg_sentiment| 超過則視為極端
-  daily_claude_call_cap: 3          # 每日最多升級嘗試數
+  min_conf_for_no_escalation: 0.80
+  sentiment_extreme: 0.10
+  daily_claude_call_cap: 2
 
-router:
-  enable_claude: false
-  claude_model: "claude-3-5-haiku-latest"
-
-policy:
-  min_conf_for_no_escalation: 0.55
-  sentiment_extreme: 0.40
-  daily_claude_call_cap: 1
 

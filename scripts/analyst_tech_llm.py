@@ -2,6 +2,11 @@
 import sys, pathlib, csv, sqlite3, datetime as dt, yaml
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
+def _as_result(obj):
+    if isinstance(obj, dict) and "status" in obj and "content" in obj:
+        return obj
+    return {"status": "OK", "content": str(obj) if obj is not None else ""}
+
 from src.utils.env import load_env
 from src.api_router import route
 from src.llm_clients.groq_client import GroqClient

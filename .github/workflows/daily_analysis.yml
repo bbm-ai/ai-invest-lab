@@ -4,37 +4,43 @@ on:
   schedule:
     - cron: '30 14 * * 1-5'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: '執行模式'
+        required: false
+        default: 'analysis'
+        type: choice
+        options:
+          - analysis
+          - validate
+          - weekly
+          - all
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Run Analysis
+      - run: pip install -r requirements.txt
+      - name: Run
         env:
           GAS_URL: ${{ secrets.GAS_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python qqq_analyzer.py
-      
-      - name: Upload result
-        uses: actions/upload-artifact@v4
+        run: |
+          MODE="${{ github.event.inputs.mode || 'analysis' }}"
+          case $MODE in
+            validate) python qqq_analyzer.py --validate ;;
+            weekly) python qqq_analyzer.py --weekly ;;
+            all) python qqq_analyzer.py --all ;;
+            *) python qqq_analyzer.py ;;
+          esac
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: result-${{ github.run_number }}
-          path: output.json
+          name: results-${{ github.run_number }}
+          path: "*.json"
           if-no-files-found: ignore

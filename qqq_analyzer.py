@@ -30,7 +30,7 @@ class Config:
     
     # 從環境變數讀取 (GitHub Secrets)
     GAS_URL = os.environ.get('GAS_URL', '')
-    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKENV', '')
     TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
     
     # 基本設定

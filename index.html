@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQQ 決策系統 Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        :root {
+            --bg-primary: #0a0f1c;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.95);
+            --border: rgba(255, 255, 255, 0.1);
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --green: #10b981;
+            --green-bg: rgba(16, 185, 129, 0.1);
+            --red: #ef4444;
+            --red-bg: rgba(239, 68, 68, 0.1);
+            --yellow: #f59e0b;
+            --yellow-bg: rgba(245, 158, 11, 0.1);
+            --blue: #3b82f6;
+            --blue-bg: rgba(59, 130, 246, 0.1);
+            --purple: #8b5cf6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--blue), var(--purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-info {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .refresh-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--blue);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .refresh-btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Grid Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 20px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .card-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        /* Metric Cards */
+        .metric-card { grid-column: span 3; }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .metric-change {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.9rem;
+        }
+
+        .positive { color: var(--green); }
+        .negative { color: var(--red); }
+        .neutral { color: var(--yellow); }
+
+        /* Regime Badge */
+        .regime-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .regime-offense { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+        .regime-neutral { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
+        .regime-defense { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+
+        /* Chart Cards */
+        .chart-card { grid-column: span 8; min-height: 400px; }
+        .chart-card-small { grid-column: span 4; min-height: 400px; }
+
+        .chart-container {
+            position: relative;
+            height: 320px;
+        }
+
+        /* Factor Scores */
+        .factor-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .factor-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .factor-name {
+            width: 80px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .factor-bar-container {
+            flex: 1;
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .factor-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .factor-score {
+            width: 40px;
+            text-align: right;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        /* Allocation */
+        .allocation-display {
+            display: flex;
+            gap: 20px;
+            margin-top: 16px;
+        }
+
+        .allocation-item {
+            flex: 1;
+            text-align: center;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+        }
+
+        .allocation-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .allocation-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .allocation-amount {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Table */
+        .table-card { grid-column: span 12; }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 14px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        tbody tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .stat-item {
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        /* Loading & Error States */
+        .loading-state, .error-state {
+            grid-column: span 12;
+            text-align: center;
+            padding: 80px 20px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--bg-secondary);
+            border-top-color: var(--blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .error-state { color: var(--red); }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .metric-card { grid-column: span 6; }
+            .chart-card, .chart-card-small { grid-column: span 12; }
+        }
+
+        @media (max-width: 768px) {
+            .container { padding: 16px; }
+            .metric-card { grid-column: span 12; }
+            header { flex-direction: column; align-items: flex-start; }
+            .allocation-display { flex-direction: column; }
+        }
+
+        /* Weekly Stats Card */
+        .weekly-card { grid-column: span 4; }
+
+        .weekly-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .weekly-stat {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .weekly-stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .weekly-stat-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        /* Validation Stats */
+        .validation-card { grid-column: span 4; }
+
+        .accuracy-ring {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 16px;
+            position: relative;
+        }
+
+        .accuracy-ring svg {
+            transform: rotate(-90deg);
+        }
+
+        .accuracy-ring circle {
+            fill: none;
+            stroke-width: 8;
+        }
+
+        .accuracy-ring .bg { stroke: var(--bg-secondary); }
+        .accuracy-ring .progress { stroke: var(--green); stroke-linecap: round; transition: stroke-dashoffset 0.5s ease; }
+
+        .accuracy-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+
+        .accuracy-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .accuracy-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <h1>📊 QQQ 決策系統</h1>
+            </div>
+            <div class="header-info">
+                <div class="status-pill">
+                    <div class="status-dot"></div>
+                    <span id="lastUpdate">載入中...</span>
+                </div>
+                <button class="refresh-btn" onclick="refreshData()" id="refreshBtn">
+                    🔄 更新
+                </button>
+            </div>
+        </header>
+
+        <!-- Loading State -->
+        <div class="dashboard-grid" id="loadingState">
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <p>正在載入數據...</p>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div class="dashboard-grid" id="errorState" style="display: none;">
+            <div class="error-state">
+                <p style="font-size: 2rem; margin-bottom: 16px;">❌</p>
+                <p id="errorMsg">載入失敗</p>
+                <button class="refresh-btn" onclick="refreshData()" style="margin-top: 20px;">重試</button>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div class="dashboard-grid" id="mainContent" style="display: none;">
+            
+            <!-- Metric Cards Row -->
+            <div class="card metric-card">
+                <div class="card-header">
+                    <span class="card-title">QQQ 收盤價</span>
+                    <div class="card-icon" style="background: var(--blue-bg);">💰</div>
+                </div>
+                <div class="metric-value" id="price">--</div>
+                <div class="metric-change" id="priceChange">--</div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="card-header">
+                    <span class="card-title">多空評分</span>
+                    <div class="card-icon" style="background: var(--purple); color: white;">🎯</div>
+                </div>
+                <div class="metric-value" id="score">--</div>
+                <div id="regime"></div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="card-header">
+                    <span class="card-title">VIX 恐慌指數</span>
+                    <div class="card-icon" style="background: var(--yellow-bg);">⚡</div>
+                </div>
+                <div class="metric-value" id="vix">--</div>
+                <div class="metric-change" id="vixChange">--</div>
+            </div>
+
+            <div class="card metric-card">
+                <div class="card-header">
+                    <span class="card-title">10Y 殖利率</span>
+                    <div class="card-icon" style="background: var(--green-bg);">📈</div>
+                </div>
+                <div class="metric-value" id="us10y">--</div>
+                <div class="metric-change" id="us10yLabel">美國十年期公債</div>
+            </div>
+
+            <!-- Price Chart -->
+            <div class="card chart-card">
+                <div class="card-header">
+                    <span class="card-title">價格與評分走勢 (30日)</span>
+                </div>
+                <div class="chart-container">
+                    <canvas id="priceChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Factor Scores -->
+            <div class="card chart-card-small">
+                <div class="card-header">
+                    <span class="card-title">因子評分</span>
+                </div>
+                <div class="factor-list" id="factorList">
+                    <!-- Dynamic content -->
+                </div>
+                <div style="margin-top: 24px;">
+                    <div class="chart-container" style="height: 200px;">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Allocation Card -->
+            <div class="card" style="grid-column: span 4;">
+                <div class="card-header">
+                    <span class="card-title">配置建議</span>
+                </div>
+                <div class="allocation-display">
+                    <div class="allocation-item">
+                        <div class="allocation-label">QQQ</div>
+                        <div class="allocation-value positive" id="qqqPct">--%</div>
+                        <div class="allocation-amount" id="qqqAmount">--</div>
+                    </div>
+                    <div class="allocation-item">
+                        <div class="allocation-label">現金</div>
+                        <div class="allocation-value" id="cashPct" style="color: var(--text-secondary);">--%</div>
+                        <div class="allocation-amount" id="cashAmount">--</div>
+                    </div>
+                </div>
+                <div style="margin-top: 20px; padding: 12px; background: var(--bg-secondary); border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">止損價位</span>
+                        <span id="stopLoss" style="font-weight: 600; color: var(--red);">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Weekly Performance -->
+            <div class="card weekly-card">
+                <div class="card-header">
+                    <span class="card-title">本週績效</span>
+                </div>
+                <div class="weekly-stats" id="weeklyStats">
+                    <div class="weekly-stat">
+                        <div class="weekly-stat-label">週報酬</div>
+                        <div class="weekly-stat-value" id="weekReturn">--</div>
+                    </div>
+                    <div class="weekly-stat">
+                        <div class="weekly-stat-label">Alpha</div>
+                        <div class="weekly-stat-value" id="weekAlpha">--</div>
+                    </div>
+                    <div class="weekly-stat">
+                        <div class="weekly-stat-label">勝率</div>
+                        <div class="weekly-stat-value" id="weekWinRate">--</div>
+                    </div>
+                    <div class="weekly-stat">
+                        <div class="weekly-stat-label">盈虧比</div>
+                        <div class="weekly-stat-value" id="weekPLRatio">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prediction Accuracy -->
+            <div class="card validation-card">
+                <div class="card-header">
+                    <span class="card-title">預測準確率</span>
+                </div>
+                <div class="accuracy-ring">
+                    <svg width="120" height="120">
+                        <circle class="bg" cx="60" cy="60" r="52"></circle>
+                        <circle class="progress" id="accuracyRing" cx="60" cy="60" r="52" 
+                                stroke-dasharray="327" stroke-dashoffset="327"></circle>
+                    </svg>
+                    <div class="accuracy-text">
+                        <div class="accuracy-value" id="accuracyValue">--%</div>
+                        <div class="accuracy-label">準確率</div>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: center; gap: 24px; margin-top: 8px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 1.25rem; font-weight: 600; color: var(--green);" id="correctCount">-</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">正確</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 1.25rem; font-weight: 600; color: var(--red);" id="wrongCount">-</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">錯誤</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Table -->
+            <div class="card table-card">
+                <div class="card-header">
+                    <span class="card-title">近期交易記錄</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>日期</th>
+                                <th>收盤</th>
+                                <th>漲跌</th>
+                                <th>VIX</th>
+                                <th>評分</th>
+                                <th>狀態</th>
+                                <th>QQQ配置</th>
+                                <th>預測</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTable">
+                            <!-- Dynamic content -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+    // ============================================
+    // 設定 - 請修改這裡
+    // ============================================
+    const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbxPaSSeF_7Nv3DaLkbL85o3YLzD6H3M39UjaVbQDvViDC1pnV4eC07MSnZVYIvDrtIpaw/exec';  // ← 替換成你的 GAS URL
+
+    // ============================================
+    // 全域變數
+    // ============================================
+    let priceChart = null;
+    let radarChart = null;
+
+    // ============================================
+    // API 請求
+    // ============================================
+    async function fetchAPI(action, params = {}) {
+        const url = new URL(GAS_API_URL);
+        url.searchParams.set('action', action);
+        Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('API request failed');
+        return response.json();
+    }
+
+    // ============================================
+    // UI 狀態控制
+    // ============================================
+    function showLoading() {
+        document.getElementById('loadingState').style.display = 'grid';
+        document.getElementById('errorState').style.display = 'none';
+        document.getElementById('mainContent').style.display = 'none';
+    }
+
+    function showError(msg) {
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('errorState').style.display = 'grid';
+        document.getElementById('errorMsg').textContent = msg;
+        document.getElementById('mainContent').style.display = 'none';
+    }
+
+    function showContent() {
+        document.getElementById('loadingState').style.display = 'none';
+        document.getElementById('errorState').style.display = 'none';
+        document.getElementById('mainContent').style.display = 'grid';
+    }
+
+    // ============================================
+    // 數據更新函數
+    // ============================================
+    function updateMetricCards(data) {
+        // Price
+        const price = parseFloat(data.close) || 0;
+        document.getElementById('price').textContent = '$' + price.toFixed(2);
+        
+        const change = parseFloat(data.change_pct) || 0;
+        const changeEl = document.getElementById('priceChange');
+        changeEl.innerHTML = `<span class="${change >= 0 ? 'positive' : 'negative'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</span>`;
+        
+        // Score
+        const score = parseFloat(data.total_score) || 0;
+        document.getElementById('score').textContent = score.toFixed(1) + '/10';
+        
+        // Regime
+        const regime = data.regime || 'neutral';
+        const regimeMap = {
+            'offense': { text: '🟢 進攻模式', class: 'regime-offense' },
+            'neutral': { text: '🟡 中性觀望', class: 'regime-neutral' },
+            'defense': { text: '🔴 防禦模式', class: 'regime-defense' }
+        };
+        const regimeInfo = regimeMap[regime] || regimeMap.neutral;
+        document.getElementById('regime').innerHTML = `<span class="regime-badge ${regimeInfo.class}">${regimeInfo.text}</span>`;
+        
+        // VIX
+        const vix = parseFloat(data.vix) || 0;
+        document.getElementById('vix').textContent = vix.toFixed(2);
+        
+        const vixChange = parseFloat(data.vix_change_pct) || 0;
+        const vixChangeEl = document.getElementById('vixChange');
+        vixChangeEl.innerHTML = `<span class="${vixChange <= 0 ? 'positive' : 'negative'}">${vixChange >= 0 ? '▲' : '▼'} ${Math.abs(vixChange).toFixed(1)}%</span>`;
+        
+        // 10Y
+        const us10y = parseFloat(data.us10y) || 0;
+        document.getElementById('us10y').textContent = us10y.toFixed(2) + '%';
+        
+        // Allocation
+        const qqqPct = parseFloat(data.qqq_pct) || 0;
+        const cashPct = parseFloat(data.cash_pct) || 0;
+        const qqqAmount = parseFloat(data.qqq_amount) || 0;
+        const cashAmount = parseFloat(data.cash_amount) || 0;
+        
+        document.getElementById('qqqPct').textContent = qqqPct + '%';
+        document.getElementById('cashPct').textContent = cashPct + '%';
+        document.getElementById('qqqAmount').textContent = '$' + qqqAmount.toLocaleString();
+        document.getElementById('cashAmount').textContent = '$' + cashAmount.toLocaleString();
+        
+        // Stop Loss
+        const stopLoss = parseFloat(data.stop_loss) || (price * 0.98);
+        document.getElementById('stopLoss').textContent = '$' + stopLoss.toFixed(2);
+        
+        // Last Update
+        if (data.created_at) {
+            const date = new Date(data.created_at);
+            document.getElementById('lastUpdate').textContent = date.toLocaleString('zh-TW');
+        }
+    }
+
+    function updateFactorScores(factorScores) {
+        const container = document.getElementById('factorList');
+        if (!factorScores) {
+            container.innerHTML = '<p style="color: var(--text-muted);">無數據</p>';
+            return;
+        }
+        
+        // Parse if string
+        if (typeof factorScores === 'string') {
+            try { factorScores = JSON.parse(factorScores); } catch(e) { return; }
+        }
+        
+        const factorNames = {
+            'price_momentum': '價格動能',
+            'volume': '成交量',
+            'vix': 'VIX',
+            'bond': '債市',
+            'mag7': '權重股'
+        };
+        
+        const colors = {
+            'price_momentum': 'var(--blue)',
+            'volume': 'var(--purple)',
+            'vix': 'var(--yellow)',
+            'bond': 'var(--green)',
+            'mag7': 'var(--red)'
+        };
+        
+        let html = '';
+        const scores = [];
+        const labels = [];
+        
+        Object.entries(factorScores).forEach(([factor, data]) => {
+            const score = data.score || 5;
+            const name = factorNames[factor] || factor;
+            const color = colors[factor] || 'var(--blue)';
+            const width = (score / 10) * 100;
+            
+            html += `
+                <div class="factor-item">
+                    <span class="factor-name">${name}</span>
+                    <div class="factor-bar-container">
+                        <div class="factor-bar" style="width: ${width}%; background: ${color};"></div>
+                    </div>
+                    <span class="factor-score">${score}</span>
+                </div>
+            `;
+            
+            labels.push(name);
+            scores.push(score);
+        });
+        
+        container.innerHTML = html;
+        
+        // Update Radar Chart
+        updateRadarChart(labels, scores);
+    }
+
+    function updateRadarChart(labels, scores) {
+        const ctx = document.getElementById('radarChart').getContext('2d');
+        
+        if (radarChart) radarChart.destroy();
+        
+        radarChart = new Chart(ctx, {
+            type: 'radar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: scores,
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    r: {
+                        min: 0,
+                        max: 10,
+                        ticks: { 
+                            stepSize: 2,
+                            color: '#6b7280',
+                            backdropColor: 'transparent'
+                        },
+                        grid: { color: 'rgba(255,255,255,0.1)' },
+                        pointLabels: { 
+                            color: '#9ca3af',
+                            font: { size: 11 }
+                        }
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    function updatePriceChart(history) {
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        
+        if (priceChart) priceChart.destroy();
+        
+        if (!history || !history.length) return;
+        
+        const labels = history.map(d => d.date);
+        const prices = history.map(d => parseFloat(d.close) || 0);
+        const scores = history.map(d => parseFloat(d.total_score) || 0);
+        
+        priceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'QQQ 價格',
+                        data: prices,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: '評分',
+                        data: scores,
+                        borderColor: '#f59e0b',
+                        borderDash: [5, 5],
+                        fill: false,
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#6b7280', maxRotation: 0 }
+                    },
+                    y: {
+                        position: 'left',
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#6b7280' }
+                    },
+                    y1: {
+                        position: 'right',
+                        min: 0,
+                        max: 10,
+                        grid: { display: false },
+                        ticks: { color: '#6b7280' }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        labels: { color: '#9ca3af' }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateHistoryTable(history) {
+        const tbody = document.getElementById('historyTable');
+        
+        if (!history || !history.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">無數據</td></tr>';
+            return;
+        }
+        
+        const regimeMap = {
+            'offense': '<span class="positive">🟢 進攻</span>',
+            'neutral': '<span class="neutral">🟡 中性</span>',
+            'defense': '<span class="negative">🔴 防禦</span>'
+        };
+        
+        const predictionMap = {
+            'bullish': '<span class="positive">看多</span>',
+            'neutral': '<span class="neutral">中性</span>',
+            'bearish': '<span class="negative">看空</span>'
+        };
+        
+        tbody.innerHTML = history.slice(-10).reverse().map(row => {
+            const change = parseFloat(row.change_pct) || 0;
+            const changeClass = change >= 0 ? 'positive' : 'negative';
+            const regime = regimeMap[row.regime] || row.regime || '--';
+            const prediction = predictionMap[row.prediction] || predictionMap[row.next_day_bias] || '--';
+            
+            return `
+                <tr>
+                    <td>${row.date || '--'}</td>
+                    <td>$${parseFloat(row.close || 0).toFixed(2)}</td>
+                    <td class="${changeClass}">${change >= 0 ? '+' : ''}${change.toFixed(2)}%</td>
+                    <td>${parseFloat(row.vix || 0).toFixed(1)}</td>
+                    <td>${parseFloat(row.total_score || 0).toFixed(1)}</td>
+                    <td>${regime}</td>
+                    <td>${row.qqq_pct || '--'}%</td>
+                    <td>${prediction}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function updateWeeklyStats(weeklyData) {
+        if (!weeklyData || weeklyData.error) {
+            document.getElementById('weekReturn').textContent = '--';
+            document.getElementById('weekAlpha').textContent = '--';
+            document.getElementById('weekWinRate').textContent = '--';
+            document.getElementById('weekPLRatio').textContent = '--';
+            return;
+        }
+        
+        // If array, get latest
+        const data = Array.isArray(weeklyData) ? weeklyData[weeklyData.length - 1] : weeklyData;
+        if (!data) return;
+        
+        const weekReturn = parseFloat(data.week_return) || 0;
+        const alpha = parseFloat(data.alpha) || 0;
+        const winRate = parseFloat(data.win_rate) || 0;
+        const plRatio = parseFloat(data.profit_loss_ratio) || 0;
+        
+        document.getElementById('weekReturn').innerHTML = `<span class="${weekReturn >= 0 ? 'positive' : 'negative'}">${weekReturn >= 0 ? '+' : ''}${weekReturn.toFixed(2)}%</span>`;
+        document.getElementById('weekAlpha').innerHTML = `<span class="${alpha >= 0 ? 'positive' : 'negative'}">${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}%</span>`;
+        document.getElementById('weekWinRate').textContent = winRate.toFixed(0) + '%';
+        document.getElementById('weekPLRatio').textContent = plRatio.toFixed(2);
+    }
+
+    function updateValidationStats(validations) {
+        let correct = 0;
+        let total = 0;
+        
+        if (Array.isArray(validations)) {
+            validations.forEach(v => {
+                if (v.is_correct === true || v.is_correct === 'TRUE') correct++;
+                total++;
+            });
+        }
+        
+        const accuracy = total > 0 ? (correct / total * 100) : 0;
+        const circumference = 2 * Math.PI * 52; // r=52
+        const offset = circumference - (accuracy / 100) * circumference;
+        
+        document.getElementById('accuracyValue').textContent = accuracy.toFixed(0) + '%';
+        document.getElementById('accuracyRing').style.strokeDashoffset = offset;
+        document.getElementById('correctCount').textContent = correct;
+        document.getElementById('wrongCount').textContent = total - correct;
+    }
+
+    // ============================================
+    // 主要載入函數
+    // ============================================
+    async function refreshData() {
+        const btn = document.getElementById('refreshBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ 載入中...';
+        
+        showLoading();
+        
+        try {
+            // Fetch all data in parallel
+            const [latest, history, weeklyReviews, validations] = await Promise.all([
+                fetchAPI('latest'),
+                fetchAPI('history', { days: 30 }),
+                fetchAPI('weekly_reviews', { count: 1 }).catch(() => null),
+                fetchAPI('validations', { days: 30 }).catch(() => [])
+            ]);
+            
+            if (latest.error) throw new Error(latest.error);
+            
+            // Update all components
+            updateMetricCards(latest);
+            updateFactorScores(latest.factor_scores);
+            
+            if (Array.isArray(history)) {
+                updatePriceChart(history);
+                updateHistoryTable(history);
+            }
+            
+            updateWeeklyStats(weeklyReviews);
+            updateValidationStats(validations);
+            
+            showContent();
+            
+        } catch (error) {
+            console.error('Error:', error);
+            showError(error.message || '無法連接到伺服器');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 更新';
+        }
+    }
+
+    // ============================================
+    // 初始化
+    // ============================================
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshData();
+        
+        // Auto refresh every 5 minutes
+        setInterval(refreshData, 5 * 60 * 1000);
+    });
+    </script>
+</body>
+</html>

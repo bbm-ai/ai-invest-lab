@@ -1,0 +1,30 @@
+name: QQQ Weekly Review
+
+on:
+  schedule:
+    - cron: '0 2 * * 6'  # UTC 02:00 = 台北 10:00 (週六)
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run Weekly Review
+        env:
+          GAS_URL: ${{ secrets.GAS_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python qqq_analyzer.py --weekly
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weekly-review-${{ github.run_number }}
+          path: weekly_review.json
+          if-no-files-found: ignore

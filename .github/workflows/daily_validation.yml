@@ -1,0 +1,30 @@
+name: QQQ Daily Validation
+
+on:
+  schedule:
+    - cron: '35 1 * * 2-6'  # UTC 01:35 = 台北 09:35
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run Validation
+        env:
+          GAS_URL: ${{ secrets.GAS_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python qqq_analyzer.py --validate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ github.run_number }}
+          path: validation.json
+          if-no-files-found: ignore

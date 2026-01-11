@@ -1,9 +1,27 @@
 name: QQQ Daily Analysis
 
 on:
+  # 定時執行
+  # UTC 14:30 = 台北時間 22:30
+  # UTC 14:35 = 台北時間 22:35 (備用，錯開尖峰)
   schedule:
-    - cron: '30 14 * * 1-5'  # UTC 14:30 = 台北 22:30
+    - cron: '30 14 * * 1-5'  # 週一到週五 22:30 台北時間
+  
+  # 允許手動觸發測試
   workflow_dispatch:
+    inputs:
+      risk_preference:
+        description: '風險偏好'
+        required: false
+        default: 'neutral'
+        type: choice
+        options:
+          - conservative
+          - neutral
+          - aggressive
+
+env:
+  PYTHON_VERSION: '3.11'
 
 jobs:
   analyze:
@@ -11,28 +29,86 @@ jobs:
     timeout-minutes: 10
     
     steps:
-      - uses: actions/checkout@v4
+      # 1. 取得程式碼
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
       
-      - uses: actions/setup-python@v5
+      # 2. 設定 Python
+      - name: 🐍 Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
           cache-dependency-path: 'python/requirements.txt'
       
-      - name: Install dependencies
-        run: pip install -r python/requirements.txt
+      # 3. 安裝依賴
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt
       
-      - name: Run Analysis
+      # 4. 執行分析
+      - name: 🚀 Run QQQ Analysis
         env:
           GAS_URL: ${{ secrets.GAS_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RISK_PREFERENCE: ${{ github.event.inputs.risk_preference || 'neutral' }}
         working-directory: python
         run: python qqq_analyzer.py
       
-      - uses: actions/upload-artifact@v4
+      # 5. 上傳結果
+      - name: 📤 Upload analysis result
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: result-${{ github.run_number }}
+          name: analysis-${{ github.run_number }}-${{ github.run_attempt }}
           path: python/output.json
           retention-days: 90
+      
+      # 6. 建立 Summary
+      - name: 📊 Create Job Summary
+        if: success()
+        working-directory: python
+        run: |
+          if [ -f output.json ]; then
+            echo "## 📊 QQQ 分析結果" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| 項目 | 數值 |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 日期 | $(jq -r '.date' output.json) |" >> $GITHUB_STEP_SUMMARY
+            echo "| 收盤價 | \$$(jq -r '.market_data.close' output.json) |" >> $GITHUB_STEP_SUMMARY
+            echo "| 漲跌 | $(jq -r '.market_data.change_pct' output.json)% |" >> $GITHUB_STEP_SUMMARY
+            echo "| 評分 | $(jq -r '.scoring.total_score' output.json)/10 |" >> $GITHUB_STEP_SUMMARY
+            echo "| 狀態 | $(jq -r '.scoring.regime' output.json) |" >> $GITHUB_STEP_SUMMARY
+            echo "| QQQ 配置 | $(jq -r '.allocation.qqq_pct' output.json)% |" >> $GITHUB_STEP_SUMMARY
+            echo "| VIX | $(jq -r '.market_data.vix' output.json) |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ 分析完成於 $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # 風控監控 (選用)
+  risk-check:
+    runs-on: ubuntu-latest
+    needs: analyze
+    if: always()
+    
+    steps:
+      - name: 📥 Download analysis result
+        uses: actions/download-artifact@v4
+        with:
+          name: analysis-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ./
+      
+      - name: ⚠️ Check risk alerts
+        run: |
+          if [ -f output.json ]; then
+            TRIGGERED=$(jq -r '.risk_management.triggered' output.json)
+            VIX=$(jq -r '.market_data.vix' output.json)
+            
+            if [ "$TRIGGERED" = "true" ]; then
+              echo "::warning::風控警報觸發！VIX: $VIX"
+            else
+              echo "✅ 無風控警報"
+            fi
+          fi

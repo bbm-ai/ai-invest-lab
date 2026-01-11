@@ -27,7 +27,7 @@ import requests
 
 class Config:
     GAS_URL = os.environ.get('GAS_URL', '')
-    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKENV', '')
+    TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
     TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
     TICKER = "QQQ"
     INITIAL_CAPITAL = 10_000_000

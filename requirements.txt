@@ -2,3 +2,5 @@ pyyaml
 jinja2
 pandas
 numpy
+yfinance
+requests

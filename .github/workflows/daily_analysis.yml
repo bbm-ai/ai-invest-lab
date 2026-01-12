@@ -15,6 +15,14 @@ on:
           - validate
           - weekly
           - all
+      strategy:
+        description: '交易策略'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - ma20
 
 jobs:
   analyze:
@@ -25,19 +33,31 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - name: Run Daily Analysis
+      - name: Run Analysis
         env:
           GAS_URL: ${{ secrets.GAS_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          STRATEGY: ${{ secrets.STRATEGY }}  # 新增這行
         run: |
           MODE="${{ github.event.inputs.mode || 'analysis' }}"
+          STRATEGY="${{ github.event.inputs.strategy || secrets.STRATEGY || 'default' }}"
+          
+          echo "📊 執行模式: $MODE"
+          echo "📈 交易策略: $STRATEGY"
+          
           case $MODE in
-            validate) python qqq_analyzer.py --validate ;;
-            weekly) python qqq_analyzer.py --weekly ;;
-            all) python qqq_analyzer.py --all ;;
-            *) python qqq_analyzer.py ;;
+            validate) 
+              python qqq_analyzer.py --validate 
+              ;;
+            weekly) 
+              python qqq_analyzer.py --weekly 
+              ;;
+            all) 
+              python qqq_analyzer.py --strategy $STRATEGY --all 
+              ;;
+            *) 
+              python qqq_analyzer.py --strategy $STRATEGY 
+              ;;
           esac
       - uses: actions/upload-artifact@v4
         if: always()

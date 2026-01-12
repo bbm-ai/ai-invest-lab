@@ -1,0 +1,64 @@
+name: QQQ Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      weeks:
+        description: '回測週數'
+        required: false
+        default: '10'
+        type: string
+      mode:
+        description: '執行模式'
+        required: false
+        default: 'compare'
+        type: choice
+        options:
+          - compare
+          - optimize
+          - ma20
+          - default
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas numpy
+      
+      - name: Run Backtest
+        run: |
+          WEEKS="${{ github.event.inputs.weeks || '10' }}"
+          MODE="${{ github.event.inputs.mode || 'compare' }}"
+          
+          echo "📊 回測週數: $WEEKS"
+          echo "📈 執行模式: $MODE"
+          
+          case $MODE in
+            optimize)
+              python backtest.py --weeks $WEEKS --optimize --export
+              ;;
+            compare)
+              python backtest.py --weeks $WEEKS --compare --export
+              ;;
+            *)
+              python backtest.py --weeks $WEEKS --strategy $MODE --export
+              ;;
+          esac
+      
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest-results-${{ github.run_number }}
+          path: |
+            *.json
+          if-no-files-found: ignore
+          retention-days: 90

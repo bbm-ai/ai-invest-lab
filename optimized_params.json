@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "last_updated": "2026-01-12T13:50:28.782659",
+    "last_backtest_weeks": 10,
+    "version": "2.0"
+  },
+  "ma20": {
+    "days_threshold": 1,
+    "vix_limit": 30,
+    "position_weight": 0.4,
+    "trend_weight": 0.2,
+    "vix_weight": 0.4,
+    "backtest_result": {
+      "total_return": -0.87,
+      "qqq_return": 0.95,
+      "alpha": -1.81,
+      "sharpe_ratio": -0.63,
+      "max_drawdown": 3.18,
+      "win_rate": 55.0,
+      "profit_loss_ratio": 0.74,
+      "accuracy": 43.2,
+      "total_trades": 37
+    }
+  },
+  "default": {
+    "weights": {
+      "price_momentum": 0.35,
+      "volume": 0.15,
+      "vix": 0.25,
+      "bond": 0.1,
+      "mag7": 0.15
+    },
+    "backtest_result": {
+      "total_return": 1.13,
+      "qqq_return": 0.95,
+      "alpha": 0.19,
+      "sharpe_ratio": 0.88,
+      "max_drawdown": 2.74,
+      "win_rate": 55.0,
+      "profit_loss_ratio": 0.94,
+      "accuracy": 85.7,
+      "total_trades": 7
+    }
+  }
+}

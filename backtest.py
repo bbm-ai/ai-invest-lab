@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
 QQQ 策略回測工具
-Version: 1.0
+Version: 2.0
 
 功能：
 1. 抓取過去 N 週的歷史數據
 2. 模擬策略執行
 3. 計算績效指標
-4. 參數優化
+4. 參數優化並自動更新 optimized_params.json
 
 使用方式：
     python backtest.py                      # 回測預設 10 週
     python backtest.py --weeks 20           # 回測 20 週
-    python backtest.py --optimize           # 參數優化
+    python backtest.py --optimize           # 參數優化 (自動更新 JSON)
     python backtest.py --strategy ma20      # 指定策略
     python backtest.py --compare            # 比較所有策略
 """
 
 import json
+import os
 import argparse
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple
@@ -27,6 +28,87 @@ import itertools
 import yfinance as yf
 import pandas as pd
 import numpy as np
+
+
+# ============================================
+# 設定
+# ============================================
+
+PARAMS_FILE = 'optimized_params.json'  # 參數檔案路徑
+
+
+# ============================================
+# 參數管理
+# ============================================
+
+class ParamsManager:
+    """參數檔案管理器"""
+    
+    @staticmethod
+    def load() -> Dict:
+        """讀取參數檔案"""
+        if os.path.exists(PARAMS_FILE):
+            try:
+                with open(PARAMS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+        
+        # 預設參數
+        return {
+            "meta": {
+                "last_updated": None,
+                "last_backtest_weeks": None,
+                "version": "2.0"
+            },
+            "ma20": {
+                "days_threshold": 2,
+                "vix_limit": 35,
+                "position_weight": 0.50,
+                "trend_weight": 0.30,
+                "vix_weight": 0.20,
+                "backtest_result": {}
+            },
+            "default": {
+                "weights": {
+                    "price_momentum": 0.30,
+                    "volume": 0.20,
+                    "vix": 0.20,
+                    "bond": 0.15,
+                    "mag7": 0.15
+                },
+                "backtest_result": {}
+            }
+        }
+    
+    @staticmethod
+    def save(params: Dict):
+        """儲存參數檔案"""
+        params['meta']['last_updated'] = datetime.now().isoformat()
+        
+        with open(PARAMS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(params, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n💾 參數已更新: {PARAMS_FILE}")
+    
+    @staticmethod
+    def update_strategy(strategy_name: str, new_params: Dict, backtest_result: Dict, weeks: int):
+        """更新特定策略的參數"""
+        params = ParamsManager.load()
+        
+        # 更新策略參數
+        if strategy_name not in params:
+            params[strategy_name] = {}
+        
+        params[strategy_name].update(new_params)
+        params[strategy_name]['backtest_result'] = backtest_result
+        
+        # 更新 meta
+        params['meta']['last_backtest_weeks'] = weeks
+        
+        ParamsManager.save(params)
+        
+        return params
 
 
 # ============================================
@@ -67,6 +149,20 @@ class BacktestResult:
     total_trades: int
     accuracy: float
     daily_results: List[DailyResult]
+    
+    def to_dict(self) -> Dict:
+        """轉換為字典"""
+        return {
+            'total_return': self.total_return,
+            'qqq_return': self.qqq_return,
+            'alpha': self.alpha,
+            'sharpe_ratio': self.sharpe_ratio,
+            'max_drawdown': self.max_drawdown,
+            'win_rate': self.win_rate,
+            'profit_loss_ratio': self.profit_loss_ratio,
+            'accuracy': self.accuracy,
+            'total_trades': self.total_trades
+        }
 
 
 # ============================================
@@ -79,7 +175,7 @@ class DataFetcher:
     @staticmethod
     def fetch_historical(ticker: str, weeks: int) -> pd.DataFrame:
         """抓取歷史數據"""
-        period = f"{weeks * 7 + 30}d"  # 多抓一些計算 MA
+        period = f"{weeks * 7 + 30}d"
         try:
             df = yf.Ticker(ticker).history(period=period)
             return df
@@ -189,12 +285,14 @@ class BaseStrategy:
         self.params = params or {}
     
     def score(self, row: pd.Series) -> Tuple[float, str, Dict]:
-        """計算評分，返回 (總分, 訊號, 因子詳情)"""
         raise NotImplementedError
     
     def get_allocation(self, score: float) -> int:
-        """根據評分返回 QQQ 配置比例"""
         raise NotImplementedError
+    
+    def get_params_for_save(self) -> Dict:
+        """返回要儲存的參數"""
+        return self.params
 
 
 class DefaultStrategy(BaseStrategy):
@@ -203,13 +301,18 @@ class DefaultStrategy(BaseStrategy):
     
     def __init__(self, params: Dict = None):
         super().__init__(params)
-        self.weights = params.get('weights', {
-            "price_momentum": 0.30,
-            "volume": 0.20,
-            "vix": 0.20,
-            "bond": 0.15,
-            "mag7": 0.15
-        })
+        
+        # 從參數檔讀取或使用預設
+        if params and 'weights' in params:
+            self.weights = params['weights']
+        else:
+            self.weights = {
+                "price_momentum": 0.30,
+                "volume": 0.20,
+                "vix": 0.20,
+                "bond": 0.15,
+                "mag7": 0.15
+            }
     
     def score(self, row: pd.Series) -> Tuple[float, str, Dict]:
         change = row['change_pct']
@@ -268,13 +371,9 @@ class DefaultStrategy(BaseStrategy):
         total = sum(factors[f] * self.weights[f] for f in self.weights)
         total = round(total, 1)
         
-        # 訊號
-        if total >= 6.5:
-            signal = 'BUY'
-        elif total <= 3.5:
-            signal = 'SELL'
-        else:
-            signal = 'HOLD'
+        if total >= 6.5: signal = 'BUY'
+        elif total <= 3.5: signal = 'SELL'
+        else: signal = 'HOLD'
         
         return total, signal, factors
     
@@ -287,6 +386,9 @@ class DefaultStrategy(BaseStrategy):
         elif score <= 7: return 75
         elif score <= 8: return 85
         else: return 90
+    
+    def get_params_for_save(self) -> Dict:
+        return {'weights': self.weights}
 
 
 class MA20Strategy(BaseStrategy):
@@ -295,12 +397,13 @@ class MA20Strategy(BaseStrategy):
     
     def __init__(self, params: Dict = None):
         super().__init__(params)
-        # 可調參數
-        self.days_threshold = params.get('days_threshold', 2)  # 連續天數閾值
-        self.vix_limit = params.get('vix_limit', 35)  # VIX 上限
-        self.position_weight = params.get('position_weight', 0.5)
-        self.trend_weight = params.get('trend_weight', 0.3)
-        self.vix_weight = params.get('vix_weight', 0.2)
+        
+        # 從參數讀取或使用預設
+        self.days_threshold = params.get('days_threshold', 2) if params else 2
+        self.vix_limit = params.get('vix_limit', 35) if params else 35
+        self.position_weight = params.get('position_weight', 0.50) if params else 0.50
+        self.trend_weight = params.get('trend_weight', 0.30) if params else 0.30
+        self.vix_weight = params.get('vix_weight', 0.20) if params else 0.20
     
     def score(self, row: pd.Series) -> Tuple[float, str, Dict]:
         ma20_diff = row.get('ma20_diff_pct', 0)
@@ -320,7 +423,7 @@ class MA20Strategy(BaseStrategy):
         elif ma20_diff > -5: factors['ma20_position'] = 3
         else: factors['ma20_position'] = 2
         
-        # MA20 Trend (連續天數)
+        # MA20 Trend
         if days_above >= self.days_threshold + 1:
             factors['ma20_trend'] = 9
             signal = 'BUY'
@@ -358,7 +461,6 @@ class MA20Strategy(BaseStrategy):
         )
         total = round(total, 1)
         
-        # VIX 過高時覆蓋訊號
         if vix > self.vix_limit:
             signal = 'RISK_OFF'
             total = min(total, 4)
@@ -374,6 +476,15 @@ class MA20Strategy(BaseStrategy):
         elif score <= 7: return 70
         elif score <= 8: return 85
         else: return 95
+    
+    def get_params_for_save(self) -> Dict:
+        return {
+            'days_threshold': self.days_threshold,
+            'vix_limit': self.vix_limit,
+            'position_weight': self.position_weight,
+            'trend_weight': self.trend_weight,
+            'vix_weight': self.vix_weight
+        }
 
 
 # ============================================
@@ -391,7 +502,7 @@ class BacktestEngine:
         """執行回測"""
         results = []
         cumulative_pnl = 0
-        prev_allocation = 50  # 初始配置
+        prev_allocation = 50
         
         correct_predictions = 0
         total_predictions = 0
@@ -400,24 +511,18 @@ class BacktestEngine:
             row = self.data.iloc[i]
             prev_row = self.data.iloc[i-1]
             
-            # 使用前一天數據計算評分（模擬真實情況）
             score, signal, factors = strategy.score(prev_row)
             allocation = strategy.get_allocation(score)
             
-            # 今天的實際漲跌
             change = row['change_pct']
-            
-            # 計算 PnL（用前一天的配置）
             pnl = change * (prev_allocation / 100)
             cumulative_pnl += pnl
             
-            # 驗證預測
             if signal in ['BUY', 'SELL']:
                 total_predictions += 1
                 if (signal == 'BUY' and change > 0) or (signal == 'SELL' and change < 0):
                     correct_predictions += 1
             
-            # 記錄結果
             result = DailyResult(
                 date=row.name.strftime('%Y-%m-%d'),
                 close=row['close'],
@@ -435,8 +540,6 @@ class BacktestEngine:
                 cumulative_pnl=cumulative_pnl
             )
             results.append(result)
-            
-            # 更新配置供下一天使用
             prev_allocation = allocation
         
         # 計算績效指標
@@ -444,22 +547,18 @@ class BacktestEngine:
         qqq_return = (self.data['close'].iloc[-1] / self.data['close'].iloc[0] - 1) * 100
         alpha = total_return - qqq_return
         
-        # 勝率
         pnls = [r.pnl_pct for r in results]
         win_days = len([p for p in pnls if p > 0])
-        lose_days = len([p for p in pnls if p < 0])
         win_rate = win_days / len(pnls) * 100 if pnls else 0
         
-        # 盈虧比
         gains = [p for p in pnls if p > 0]
         losses = [abs(p) for p in pnls if p < 0]
         avg_gain = sum(gains) / len(gains) if gains else 0
         avg_loss = sum(losses) / len(losses) if losses else 1
         pl_ratio = avg_gain / avg_loss if avg_loss > 0 else 0
         
-        # 最大回撤
         cumulative = [r.cumulative_pnl for r in results]
-        peak = cumulative[0]
+        peak = cumulative[0] if cumulative else 0
         max_dd = 0
         for c in cumulative:
             if c > peak:
@@ -468,7 +567,6 @@ class BacktestEngine:
             if dd > max_dd:
                 max_dd = dd
         
-        # 夏普比率 (年化)
         if len(pnls) > 1:
             mean_return = np.mean(pnls) * 252
             std_return = np.std(pnls) * np.sqrt(252)
@@ -476,12 +574,11 @@ class BacktestEngine:
         else:
             sharpe = 0
         
-        # 準確率
         accuracy = correct_predictions / total_predictions * 100 if total_predictions > 0 else 0
         
         return BacktestResult(
             strategy=strategy.name,
-            params=strategy.params,
+            params=strategy.get_params_for_save(),
             total_return=round(total_return, 2),
             qqq_return=round(qqq_return, 2),
             alpha=round(alpha, 2),
@@ -502,29 +599,30 @@ class BacktestEngine:
 class ParameterOptimizer:
     """參數優化器"""
     
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self, data: pd.DataFrame, weeks: int):
         self.data = data
+        self.weeks = weeks
         self.engine = BacktestEngine(data)
     
-    def optimize_ma20(self) -> List[Dict]:
+    def optimize_ma20(self, auto_save: bool = True) -> Tuple[Dict, BacktestResult]:
         """優化 MA20 策略參數"""
         print("\n🔧 優化 MA20 策略參數...")
         
         # 參數搜索空間
         days_thresholds = [1, 2, 3]
-        vix_limits = [30, 35, 40]
+        vix_limits = [30, 35, 40, 45]
         position_weights = [0.4, 0.5, 0.6]
         trend_weights = [0.2, 0.3, 0.4]
         
         results = []
-        total_combinations = len(days_thresholds) * len(vix_limits) * len(position_weights) * len(trend_weights)
+        total = len(days_thresholds) * len(vix_limits) * len(position_weights) * len(trend_weights)
         
-        print(f"  測試 {total_combinations} 種參數組合...")
+        print(f"  測試 {total} 種參數組合...")
         
         for days, vix_lim, pos_w, trend_w in itertools.product(
             days_thresholds, vix_limits, position_weights, trend_weights
         ):
-            vix_w = 1 - pos_w - trend_w
+            vix_w = round(1 - pos_w - trend_w, 2)
             if vix_w < 0.1 or vix_w > 0.4:
                 continue
             
@@ -533,40 +631,62 @@ class ParameterOptimizer:
                 'vix_limit': vix_lim,
                 'position_weight': pos_w,
                 'trend_weight': trend_w,
-                'vix_weight': round(vix_w, 2)
+                'vix_weight': vix_w
             }
             
             strategy = MA20Strategy(params)
             result = self.engine.run(strategy)
             
+            # 綜合評分
+            composite = (
+                result.alpha * 0.30 +
+                result.sharpe_ratio * 0.25 +
+                result.win_rate * 0.20 +
+                result.accuracy * 0.15 -
+                result.max_drawdown * 0.10
+            )
+            
             results.append({
                 'params': params,
-                'total_return': result.total_return,
-                'alpha': result.alpha,
-                'sharpe': result.sharpe_ratio,
-                'max_dd': result.max_drawdown,
-                'win_rate': result.win_rate,
-                'accuracy': result.accuracy,
-                # 綜合評分 (可調整權重)
-                'composite_score': (
-                    result.alpha * 0.3 +
-                    result.sharpe_ratio * 0.3 +
-                    result.win_rate * 0.2 +
-                    result.accuracy * 0.2 -
-                    result.max_drawdown * 0.1
-                )
+                'result': result,
+                'composite_score': composite
             })
         
-        # 按綜合評分排序
+        # 排序
         results.sort(key=lambda x: x['composite_score'], reverse=True)
         
-        return results
+        best = results[0]
+        best_params = best['params']
+        best_result = best['result']
+        
+        print(f"\n🏆 最佳參數:")
+        print(f"  days_threshold: {best_params['days_threshold']}")
+        print(f"  vix_limit: {best_params['vix_limit']}")
+        print(f"  position_weight: {best_params['position_weight']}")
+        print(f"  trend_weight: {best_params['trend_weight']}")
+        print(f"  vix_weight: {best_params['vix_weight']}")
+        print(f"\n📈 績效:")
+        print(f"  Alpha: {best_result.alpha:+.2f}%")
+        print(f"  夏普: {best_result.sharpe_ratio:.2f}")
+        print(f"  勝率: {best_result.win_rate:.1f}%")
+        print(f"  準確率: {best_result.accuracy:.1f}%")
+        
+        # 自動儲存
+        if auto_save:
+            ParamsManager.update_strategy(
+                'ma20',
+                best_params,
+                best_result.to_dict(),
+                self.weeks
+            )
+        
+        return best_params, best_result
     
-    def optimize_default(self) -> List[Dict]:
+    def optimize_default(self, auto_save: bool = True) -> Tuple[Dict, BacktestResult]:
         """優化 Default 策略權重"""
         print("\n🔧 優化 Default 策略權重...")
         
-        # 權重搜索空間 (總和必須為 1)
+        # 權重搜索空間
         weight_sets = [
             {"price_momentum": 0.30, "volume": 0.20, "vix": 0.20, "bond": 0.15, "mag7": 0.15},
             {"price_momentum": 0.35, "volume": 0.15, "vix": 0.25, "bond": 0.10, "mag7": 0.15},
@@ -576,39 +696,60 @@ class ParameterOptimizer:
             {"price_momentum": 0.25, "volume": 0.20, "vix": 0.25, "bond": 0.15, "mag7": 0.15},
             {"price_momentum": 0.35, "volume": 0.20, "vix": 0.15, "bond": 0.15, "mag7": 0.15},
             {"price_momentum": 0.30, "volume": 0.10, "vix": 0.30, "bond": 0.15, "mag7": 0.15},
+            {"price_momentum": 0.35, "volume": 0.10, "vix": 0.30, "bond": 0.10, "mag7": 0.15},
+            {"price_momentum": 0.40, "volume": 0.10, "vix": 0.25, "bond": 0.10, "mag7": 0.15},
         ]
         
         results = []
+        
+        print(f"  測試 {len(weight_sets)} 種權重組合...")
         
         for weights in weight_sets:
             params = {'weights': weights}
             strategy = DefaultStrategy(params)
             result = self.engine.run(strategy)
             
+            composite = (
+                result.alpha * 0.30 +
+                result.sharpe_ratio * 0.25 +
+                result.win_rate * 0.20 +
+                result.accuracy * 0.15 -
+                result.max_drawdown * 0.10
+            )
+            
             results.append({
                 'params': params,
-                'total_return': result.total_return,
-                'alpha': result.alpha,
-                'sharpe': result.sharpe_ratio,
-                'max_dd': result.max_drawdown,
-                'win_rate': result.win_rate,
-                'accuracy': result.accuracy,
-                'composite_score': (
-                    result.alpha * 0.3 +
-                    result.sharpe_ratio * 0.3 +
-                    result.win_rate * 0.2 +
-                    result.accuracy * 0.2 -
-                    result.max_drawdown * 0.1
-                )
+                'result': result,
+                'composite_score': composite
             })
         
         results.sort(key=lambda x: x['composite_score'], reverse=True)
         
-        return results
+        best = results[0]
+        best_params = best['params']
+        best_result = best['result']
+        
+        print(f"\n🏆 最佳權重:")
+        for k, v in best_params['weights'].items():
+            print(f"  {k}: {v}")
+        print(f"\n📈 績效:")
+        print(f"  Alpha: {best_result.alpha:+.2f}%")
+        print(f"  夏普: {best_result.sharpe_ratio:.2f}")
+        print(f"  勝率: {best_result.win_rate:.1f}%")
+        
+        if auto_save:
+            ParamsManager.update_strategy(
+                'default',
+                best_params,
+                best_result.to_dict(),
+                self.weeks
+            )
+        
+        return best_params, best_result
 
 
 # ============================================
-# 報表生成
+# 報表
 # ============================================
 
 def print_backtest_result(result: BacktestResult):
@@ -627,61 +768,7 @@ def print_backtest_result(result: BacktestResult):
     print(f"\n📋 交易統計:")
     print(f"  • 勝率: {result.win_rate:.1f}%")
     print(f"  • 盈虧比: {result.profit_loss_ratio:.2f}")
-    print(f"  • 交易次數: {result.total_trades}")
     print(f"  • 預測準確率: {result.accuracy:.1f}%")
-
-
-def print_optimization_results(results: List[Dict], top_n: int = 5):
-    """列印優化結果"""
-    print(f"\n🏆 Top {top_n} 參數組合:")
-    print("-" * 80)
-    
-    for i, r in enumerate(results[:top_n], 1):
-        print(f"\n#{i}")
-        print(f"  參數: {json.dumps(r['params'], indent=2)}")
-        print(f"  報酬: {r['total_return']:+.2f}% | Alpha: {r['alpha']:+.2f}% | 夏普: {r['sharpe']:.2f}")
-        print(f"  勝率: {r['win_rate']:.1f}% | 準確率: {r['accuracy']:.1f}% | 最大回撤: {r['max_dd']:.2f}%")
-        print(f"  綜合評分: {r['composite_score']:.2f}")
-
-
-def export_results(result: BacktestResult, filename: str):
-    """匯出結果到 JSON"""
-    data = {
-        'strategy': result.strategy,
-        'params': result.params,
-        'summary': {
-            'total_return': result.total_return,
-            'qqq_return': result.qqq_return,
-            'alpha': result.alpha,
-            'sharpe_ratio': result.sharpe_ratio,
-            'max_drawdown': result.max_drawdown,
-            'win_rate': result.win_rate,
-            'profit_loss_ratio': result.profit_loss_ratio,
-            'accuracy': result.accuracy
-        },
-        'daily_results': [
-            {
-                'date': r.date,
-                'close': r.close,
-                'change_pct': r.change_pct,
-                'ma20': r.ma20,
-                'days_above': r.days_above,
-                'days_below': r.days_below,
-                'vix': r.vix,
-                'score': r.score,
-                'signal': r.signal,
-                'qqq_pct': r.qqq_pct,
-                'pnl_pct': r.pnl_pct,
-                'cumulative_pnl': r.cumulative_pnl
-            }
-            for r in result.daily_results
-        ]
-    }
-    
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    print(f"\n💾 結果已匯出: {filename}")
 
 
 # ============================================
@@ -689,16 +776,16 @@ def export_results(result: BacktestResult, filename: str):
 # ============================================
 
 def main():
-    parser = argparse.ArgumentParser(description='QQQ 策略回測工具')
-    parser.add_argument('--weeks', type=int, default=10, help='回測週數 (預設: 10)')
+    parser = argparse.ArgumentParser(description='QQQ 策略回測工具 v2.0')
+    parser.add_argument('--weeks', type=int, default=10, help='回測週數')
     parser.add_argument('--strategy', type=str, default='all', help='策略 (default, ma20, all)')
-    parser.add_argument('--optimize', action='store_true', help='執行參數優化')
+    parser.add_argument('--optimize', action='store_true', help='執行參數優化並自動儲存')
     parser.add_argument('--compare', action='store_true', help='比較所有策略')
-    parser.add_argument('--export', action='store_true', help='匯出結果到 JSON')
+    parser.add_argument('--no-save', action='store_true', help='不自動儲存參數')
     args = parser.parse_args()
     
     print("\n" + "="*60)
-    print("🔬 QQQ 策略回測工具")
+    print("🔬 QQQ 策略回測工具 v2.0")
     print("="*60)
     
     # 抓取數據
@@ -708,39 +795,41 @@ def main():
         return
     
     engine = BacktestEngine(data)
+    auto_save = not args.no_save
     
     # 參數優化
     if args.optimize:
-        optimizer = ParameterOptimizer(data)
+        optimizer = ParameterOptimizer(data, args.weeks)
+        
+        print("\n" + "="*60)
+        print("🔧 開始參數優化")
+        print("="*60)
         
         # 優化 MA20
-        ma20_results = optimizer.optimize_ma20()
-        print_optimization_results(ma20_results, top_n=5)
+        ma20_params, ma20_result = optimizer.optimize_ma20(auto_save=auto_save)
         
         # 優化 Default
-        default_results = optimizer.optimize_default()
-        print_optimization_results(default_results, top_n=3)
+        default_params, default_result = optimizer.optimize_default(auto_save=auto_save)
         
-        # 匯出最佳參數
-        best_params = {
-            'ma20': ma20_results[0]['params'] if ma20_results else {},
-            'default': default_results[0]['params'] if default_results else {}
-        }
+        # 顯示最終參數檔
+        print("\n" + "="*60)
+        print("📄 optimized_params.json 內容:")
+        print("="*60)
+        params = ParamsManager.load()
+        print(json.dumps(params, indent=2, ensure_ascii=False))
         
-        with open('optimized_params.json', 'w', encoding='utf-8') as f:
-            json.dump(best_params, f, ensure_ascii=False, indent=2)
-        
-        print("\n💾 最佳參數已儲存: optimized_params.json")
         return
     
     # 比較策略
     if args.compare or args.strategy == 'all':
-        print("\n📊 策略比較:")
+        # 讀取最佳參數
+        saved_params = ParamsManager.load()
+        
+        print(f"\n📖 載入參數: {PARAMS_FILE}")
         
         strategies = [
-            ('default', DefaultStrategy()),
-            ('ma20', MA20Strategy()),
-            ('ma20_opt', MA20Strategy({'days_threshold': 2, 'vix_limit': 35})),
+            ('default', DefaultStrategy(saved_params.get('default', {}))),
+            ('ma20', MA20Strategy(saved_params.get('ma20', {}))),
         ]
         
         comparison = []
@@ -760,25 +849,16 @@ def main():
         
         return
     
-    # 單一策略回測
+    # 單一策略
+    saved_params = ParamsManager.load()
+    
     if args.strategy == 'ma20':
-        strategy = MA20Strategy()
+        strategy = MA20Strategy(saved_params.get('ma20', {}))
     else:
-        strategy = DefaultStrategy()
+        strategy = DefaultStrategy(saved_params.get('default', {}))
     
     result = engine.run(strategy)
     print_backtest_result(result)
-    
-    # 顯示最近交易
-    print(f"\n📅 最近 10 筆交易:")
-    print(f"{'日期':<12} {'收盤':>10} {'漲跌':>8} {'MA20':>10} {'訊號':<8} {'配置':>6} {'PnL':>8}")
-    print("-" * 70)
-    for r in result.daily_results[-10:]:
-        print(f"{r.date:<12} ${r.close:>8.2f} {r.change_pct:>+7.2f}% ${r.ma20:>8.2f} {r.signal:<8} {r.qqq_pct:>5}% {r.pnl_pct:>+7.2f}%")
-    
-    # 匯出
-    if args.export:
-        export_results(result, f'backtest_{args.strategy}.json')
 
 
 if __name__ == "__main__":

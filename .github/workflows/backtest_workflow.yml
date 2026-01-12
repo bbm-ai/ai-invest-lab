@@ -1,6 +1,9 @@
-name: QQQ Backtest
+name: QQQ Backtest & Optimize
 
 on:
+  schedule:
+    # 每週日 10:00 台北時間自動執行優化
+    - cron: '0 2 * * 0'
   workflow_dispatch:
     inputs:
       weeks:
@@ -11,13 +14,13 @@ on:
       mode:
         description: '執行模式'
         required: false
-        default: 'compare'
+        default: 'optimize'
         type: choice
         options:
-          - compare
-          - optimize
-          - ma20
-          - default
+          - optimize      # 優化並自動儲存
+          - compare       # 比較策略
+          - backtest-ma20
+          - backtest-default
 
 jobs:
   backtest:
@@ -30,28 +33,47 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
-        run: |
-          pip install yfinance pandas numpy
+        run: pip install yfinance pandas numpy
       
       - name: Run Backtest
         run: |
           WEEKS="${{ github.event.inputs.weeks || '10' }}"
-          MODE="${{ github.event.inputs.mode || 'compare' }}"
+          MODE="${{ github.event.inputs.mode || 'optimize' }}"
           
           echo "📊 回測週數: $WEEKS"
           echo "📈 執行模式: $MODE"
           
           case $MODE in
             optimize)
-              python backtest.py --weeks $WEEKS --optimize --export
+              echo "🔧 執行參數優化（自動儲存）..."
+              python backtest.py --weeks $WEEKS --optimize
               ;;
             compare)
-              python backtest.py --weeks $WEEKS --compare --export
+              echo "📊 比較策略..."
+              python backtest.py --weeks $WEEKS --compare
               ;;
-            *)
-              python backtest.py --weeks $WEEKS --strategy $MODE --export
+            backtest-ma20)
+              python backtest.py --weeks $WEEKS --strategy ma20
+              ;;
+            backtest-default)
+              python backtest.py --weeks $WEEKS --strategy default
               ;;
           esac
+      
+      - name: Commit optimized params
+        if: ${{ github.event.inputs.mode == 'optimize' || github.event_name == 'schedule' }}
+        run: |
+          if [ -f optimized_params.json ]; then
+            echo "📤 提交優化後的參數..."
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add optimized_params.json
+            git diff --staged --quiet || git commit -m "🔧 Auto-optimize params ($(date +%Y-%m-%d))"
+            git push
+            echo "✅ 參數已更新並提交"
+          else
+            echo "⚠️ 找不到 optimized_params.json"
+          fi
       
       - name: Upload Results
         uses: actions/upload-artifact@v4

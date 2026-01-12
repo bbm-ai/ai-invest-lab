@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-QQQ Decision System - Complete Version
-Version: 3.0
+QQQ Decision System - Multi-Strategy Version
+Version: 4.0
 
-功能：
-1. 每日分析 (Daily Analysis) - 每日 22:30
-2. 每日驗證 (Daily Validation) - 每日 09:35 驗證前日預測
-3. 週末覆盤 (Weekly Review) - 每週六 10:00
+策略：
+1. default - 原本的多因子策略
+2. ma20 - MA20 趨勢策略 (新增)
 
 使用方式：
-    python qqq_analyzer.py                # 每日分析
-    python qqq_analyzer.py --validate     # 每日驗證
-    python qqq_analyzer.py --weekly       # 週末覆盤
+    python qqq_analyzer.py                    # 使用預設策略
+    python qqq_analyzer.py --strategy ma20    # 使用 MA20 策略
+    python qqq_analyzer.py --validate
+    python qqq_analyzer.py --weekly
 """
 
 import json
@@ -20,6 +20,7 @@ import os
 import argparse
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+from abc import ABC, abstractmethod
 
 import yfinance as yf
 import pandas as pd
@@ -38,13 +39,7 @@ class Config:
     TICKER = "QQQ"
     INITIAL_CAPITAL = 10_000_000
     RISK_PREFERENCE = os.environ.get('RISK_PREFERENCE', 'neutral')
-    DEFAULT_WEIGHTS = {
-        "price_momentum": 0.30,
-        "volume": 0.20,
-        "vix": 0.20,
-        "bond": 0.15,
-        "mag7": 0.15
-    }
+    STRATEGY = os.environ.get('STRATEGY', 'default')  # default 或 ma20
     STOP_LOSS_PCT = 0.02
     VIX_ALERT_THRESHOLD = 40
 
@@ -76,7 +71,7 @@ class MarketDataFetcher:
             return {"ticker": ticker, "success": False, "error": str(e)}
     
     @staticmethod
-    def fetch_historical(ticker: str, period: str = "1mo") -> pd.DataFrame:
+    def fetch_historical(ticker: str, period: str = "3mo") -> pd.DataFrame:
         try:
             return yf.Ticker(ticker).history(period=period)
         except:
@@ -123,10 +118,12 @@ class TechnicalAnalyzer:
         
         result = {}
         
+        # 移動平均線
         for p in [5, 20, 60]:
             if len(df) >= p:
                 result[f'ma{p}'] = round(float(df['Close'].tail(p).mean()), 2)
         
+        # RSI
         if len(df) >= 15:
             delta = df['Close'].diff()
             gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -136,14 +133,50 @@ class TechnicalAnalyzer:
             if not pd.isna(rsi.iloc[-1]):
                 result['rsi'] = round(float(rsi.iloc[-1]), 2)
         
+        # 成交量比率
         if len(df) >= 20:
             avg_vol = df['Volume'].tail(20).mean()
             result['volume_ratio'] = round(float(df['Volume'].iloc[-1] / avg_vol), 2) if avg_vol > 0 else 1.0
         
+        # 支撐壓力
         recent = df.tail(20)
         result['resistance'] = round(float(recent['High'].max()), 2)
         result['support'] = round(float(recent['Low'].min()), 2)
         
+        # MA20 相對位置
+        ma20 = result.get('ma20')
+        if ma20:
+            result['above_ma20'] = close > ma20
+            result['ma20_diff_pct'] = round((close - ma20) / ma20 * 100, 2)
+        
+        # ★ 新增：計算連續站上/跌破 MA20 的天數
+        if len(df) >= 20 and 'ma20' in result:
+            ma20_series = df['Close'].rolling(20).mean()
+            closes = df['Close']
+            
+            # 計算最近幾天的狀態
+            days_above = 0
+            days_below = 0
+            
+            for i in range(1, min(6, len(df))):  # 檢查最近 5 天
+                idx = -i
+                if pd.isna(ma20_series.iloc[idx]):
+                    break
+                if closes.iloc[idx] > ma20_series.iloc[idx]:
+                    if days_below == 0:
+                        days_above += 1
+                    else:
+                        break
+                else:
+                    if days_above == 0:
+                        days_below += 1
+                    else:
+                        break
+            
+            result['consecutive_days_above_ma20'] = days_above
+            result['consecutive_days_below_ma20'] = days_below
+        
+        # 均線位置
         ma5, ma20 = result.get('ma5'), result.get('ma20')
         if ma5 and ma20:
             if close > ma5 and close > ma20:
@@ -157,76 +190,128 @@ class TechnicalAnalyzer:
 
 
 # ============================================
-# 因子評分
+# 策略基類
 # ============================================
 
-class FactorScorer:
-    def __init__(self):
-        self.weights = Config.DEFAULT_WEIGHTS
+class BaseStrategy(ABC):
+    """策略基類"""
     
-    def score_all(self, data: Dict) -> Dict[str, Dict]:
+    name: str = "base"
+    version: str = "1.0"
+    description: str = "Base strategy"
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {}
+        self.capital = self.config.get('capital', Config.INITIAL_CAPITAL)
+    
+    @abstractmethod
+    def score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """計算評分，返回包含 total_score, regime, factor_scores 等"""
+        pass
+    
+    @abstractmethod
+    def get_allocation(self, score: float, risk_pref: str = 'neutral') -> Dict[str, Any]:
+        """根據評分計算配置"""
+        pass
+    
+    def get_regime(self, score: float) -> str:
+        """判斷市場狀態"""
+        if score <= 3.5:
+            return 'defense'
+        elif score >= 6.5:
+            return 'offense'
+        return 'neutral'
+
+
+# ============================================
+# 預設策略（多因子）
+# ============================================
+
+class DefaultStrategy(BaseStrategy):
+    """原本的多因子策略"""
+    
+    name = "default"
+    version = "1.0"
+    description = "多因子動能策略"
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config)
+        self.weights = {
+            "price_momentum": 0.30,
+            "volume": 0.20,
+            "vix": 0.20,
+            "bond": 0.15,
+            "mag7": 0.15
+        }
+    
+    def score(self, data: Dict[str, Any]) -> Dict[str, Any]:
         change = data.get('qqq', {}).get('change_pct', 0)
         vol_ratio = data.get('technicals', {}).get('volume_ratio', 1.0)
         vix = data.get('vix', {}).get('value', 20)
         bond_change = data.get('us10y', {}).get('change', 0)
         
-        scores = {}
+        factor_scores = {}
         
         # Price Momentum
-        if change > 2.0: scores['price_momentum'] = {"score": 9, "direction": "bullish"}
-        elif change > 1.0: scores['price_momentum'] = {"score": 8, "direction": "bullish"}
-        elif change > 0.5: scores['price_momentum'] = {"score": 7, "direction": "bullish"}
-        elif change > 0: scores['price_momentum'] = {"score": 6, "direction": "neutral"}
-        elif change > -0.5: scores['price_momentum'] = {"score": 5, "direction": "neutral"}
-        elif change > -1.0: scores['price_momentum'] = {"score": 4, "direction": "bearish"}
-        elif change > -2.0: scores['price_momentum'] = {"score": 3, "direction": "bearish"}
-        else: scores['price_momentum'] = {"score": 2, "direction": "bearish"}
+        if change > 2.0: factor_scores['price_momentum'] = {"score": 9, "direction": "bullish"}
+        elif change > 1.0: factor_scores['price_momentum'] = {"score": 8, "direction": "bullish"}
+        elif change > 0.5: factor_scores['price_momentum'] = {"score": 7, "direction": "bullish"}
+        elif change > 0: factor_scores['price_momentum'] = {"score": 6, "direction": "neutral"}
+        elif change > -0.5: factor_scores['price_momentum'] = {"score": 5, "direction": "neutral"}
+        elif change > -1.0: factor_scores['price_momentum'] = {"score": 4, "direction": "bearish"}
+        elif change > -2.0: factor_scores['price_momentum'] = {"score": 3, "direction": "bearish"}
+        else: factor_scores['price_momentum'] = {"score": 2, "direction": "bearish"}
         
         # Volume
-        if vol_ratio > 1.5 and change > 0: scores['volume'] = {"score": 9, "direction": "confirm"}
-        elif vol_ratio > 1.2 and change > 0: scores['volume'] = {"score": 8, "direction": "confirm"}
-        elif vol_ratio < 0.7 and change > 0: scores['volume'] = {"score": 4, "direction": "diverge"}
-        elif vol_ratio > 1.5 and change < 0: scores['volume'] = {"score": 2, "direction": "confirm"}
-        elif vol_ratio > 1.2 and change < 0: scores['volume'] = {"score": 3, "direction": "confirm"}
-        elif vol_ratio < 0.7 and change < 0: scores['volume'] = {"score": 6, "direction": "diverge"}
-        else: scores['volume'] = {"score": 5, "direction": "neutral"}
+        if vol_ratio > 1.5 and change > 0: factor_scores['volume'] = {"score": 9, "direction": "confirm"}
+        elif vol_ratio > 1.2 and change > 0: factor_scores['volume'] = {"score": 8, "direction": "confirm"}
+        elif vol_ratio < 0.7 and change > 0: factor_scores['volume'] = {"score": 4, "direction": "diverge"}
+        elif vol_ratio > 1.5 and change < 0: factor_scores['volume'] = {"score": 2, "direction": "confirm"}
+        elif vol_ratio > 1.2 and change < 0: factor_scores['volume'] = {"score": 3, "direction": "confirm"}
+        elif vol_ratio < 0.7 and change < 0: factor_scores['volume'] = {"score": 6, "direction": "diverge"}
+        else: factor_scores['volume'] = {"score": 5, "direction": "neutral"}
         
         # VIX
-        if vix < 12: scores['vix'] = {"score": 9, "direction": "favorable"}
-        elif vix < 15: scores['vix'] = {"score": 8, "direction": "favorable"}
-        elif vix < 18: scores['vix'] = {"score": 7, "direction": "favorable"}
-        elif vix < 22: scores['vix'] = {"score": 5, "direction": "neutral"}
-        elif vix < 28: scores['vix'] = {"score": 4, "direction": "unfavorable"}
-        elif vix < 35: scores['vix'] = {"score": 3, "direction": "unfavorable"}
-        else: scores['vix'] = {"score": 1, "direction": "unfavorable"}
+        if vix < 12: factor_scores['vix'] = {"score": 9, "direction": "favorable"}
+        elif vix < 15: factor_scores['vix'] = {"score": 8, "direction": "favorable"}
+        elif vix < 18: factor_scores['vix'] = {"score": 7, "direction": "favorable"}
+        elif vix < 22: factor_scores['vix'] = {"score": 5, "direction": "neutral"}
+        elif vix < 28: factor_scores['vix'] = {"score": 4, "direction": "unfavorable"}
+        elif vix < 35: factor_scores['vix'] = {"score": 3, "direction": "unfavorable"}
+        else: factor_scores['vix'] = {"score": 1, "direction": "unfavorable"}
         
         # Bond
-        if bond_change > 0.08: scores['bond'] = {"score": 2, "direction": "unfavorable"}
-        elif bond_change > 0.05: scores['bond'] = {"score": 3, "direction": "unfavorable"}
-        elif bond_change > 0.02: scores['bond'] = {"score": 4, "direction": "unfavorable"}
-        elif bond_change < -0.08: scores['bond'] = {"score": 8, "direction": "favorable"}
-        elif bond_change < -0.05: scores['bond'] = {"score": 7, "direction": "favorable"}
-        elif bond_change < -0.02: scores['bond'] = {"score": 6, "direction": "favorable"}
-        else: scores['bond'] = {"score": 5, "direction": "neutral"}
+        if bond_change > 0.08: factor_scores['bond'] = {"score": 2, "direction": "unfavorable"}
+        elif bond_change > 0.05: factor_scores['bond'] = {"score": 3, "direction": "unfavorable"}
+        elif bond_change > 0.02: factor_scores['bond'] = {"score": 4, "direction": "unfavorable"}
+        elif bond_change < -0.08: factor_scores['bond'] = {"score": 8, "direction": "favorable"}
+        elif bond_change < -0.05: factor_scores['bond'] = {"score": 7, "direction": "favorable"}
+        elif bond_change < -0.02: factor_scores['bond'] = {"score": 6, "direction": "favorable"}
+        else: factor_scores['bond'] = {"score": 5, "direction": "neutral"}
         
-        # Mag7
-        if change > 1.5: scores['mag7'] = {"score": 8, "direction": "strong"}
-        elif change > 0.5: scores['mag7'] = {"score": 7, "direction": "strong"}
-        elif change > 0: scores['mag7'] = {"score": 6, "direction": "neutral"}
-        elif change > -0.5: scores['mag7'] = {"score": 5, "direction": "neutral"}
-        elif change > -1.5: scores['mag7'] = {"score": 4, "direction": "weak"}
-        else: scores['mag7'] = {"score": 3, "direction": "weak"}
+        # Mag7 (用 QQQ 動能代理)
+        if change > 1.5: factor_scores['mag7'] = {"score": 8, "direction": "strong"}
+        elif change > 0.5: factor_scores['mag7'] = {"score": 7, "direction": "strong"}
+        elif change > 0: factor_scores['mag7'] = {"score": 6, "direction": "neutral"}
+        elif change > -0.5: factor_scores['mag7'] = {"score": 5, "direction": "neutral"}
+        elif change > -1.5: factor_scores['mag7'] = {"score": 4, "direction": "weak"}
+        else: factor_scores['mag7'] = {"score": 3, "direction": "weak"}
         
-        return scores
+        # 加權總分
+        total = sum(factor_scores[f]['score'] * self.weights[f] for f in self.weights)
+        total = round(total, 1)
+        
+        return {
+            "total_score": total,
+            "regime": self.get_regime(total),
+            "factor_scores": factor_scores,
+            "weights": self.weights
+        }
     
-    def total_score(self, scores: Dict) -> float:
-        total = sum(scores.get(f, {}).get('score', 5) * w for f, w in self.weights.items())
-        return round(total, 1)
-    
-    def get_allocation(self, score: float) -> Dict:
+    def get_allocation(self, score: float, risk_pref: str = 'neutral') -> Dict[str, Any]:
         adj = score
-        if Config.RISK_PREFERENCE == 'conservative': adj -= 1
-        elif Config.RISK_PREFERENCE == 'aggressive': adj += 1
+        if risk_pref == 'conservative': adj -= 1
+        elif risk_pref == 'aggressive': adj += 1
         adj = max(0, min(10, adj))
         
         if adj <= 2: pct = 10
@@ -239,10 +324,185 @@ class FactorScorer:
         else: pct = 90
         
         return {
-            "qqq_pct": pct, "cash_pct": 100 - pct,
-            "qqq_amount": int(Config.INITIAL_CAPITAL * pct / 100),
-            "cash_amount": int(Config.INITIAL_CAPITAL * (100 - pct) / 100)
+            "qqq_pct": pct,
+            "cash_pct": 100 - pct,
+            "qqq_amount": int(self.capital * pct / 100),
+            "cash_amount": int(self.capital * (100 - pct) / 100)
         }
+
+
+# ============================================
+# MA20 策略 (新增)
+# ============================================
+
+class MA20Strategy(BaseStrategy):
+    """
+    MA20 趨勢策略
+    
+    規則：
+    - 連續 2 天收盤 > MA20 → 看多 (買進/加碼)
+    - 連續 2 天收盤 < MA20 → 看空 (賣出/減碼)
+    - 其他 → 中性 (維持)
+    """
+    
+    name = "ma20"
+    version = "1.0"
+    description = "MA20 趨勢跟隨策略"
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        super().__init__(config)
+        self.weights = {
+            "ma20_position": 0.50,   # MA20 相對位置（主要因子）
+            "ma20_trend": 0.30,      # MA20 連續天數
+            "vix_filter": 0.20       # VIX 過濾（風控）
+        }
+    
+    def score(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        close = data.get('qqq', {}).get('close', 0)
+        technicals = data.get('technicals', {})
+        vix = data.get('vix', {}).get('value', 20)
+        
+        ma20 = technicals.get('ma20', close)
+        days_above = technicals.get('consecutive_days_above_ma20', 0)
+        days_below = technicals.get('consecutive_days_below_ma20', 0)
+        ma20_diff_pct = technicals.get('ma20_diff_pct', 0)
+        
+        factor_scores = {}
+        
+        # ===== 因子 1: MA20 相對位置 =====
+        # 價格距離 MA20 的幅度
+        if ma20_diff_pct > 5:
+            factor_scores['ma20_position'] = {"score": 9, "direction": "strong_above", "value": ma20_diff_pct}
+        elif ma20_diff_pct > 3:
+            factor_scores['ma20_position'] = {"score": 8, "direction": "above", "value": ma20_diff_pct}
+        elif ma20_diff_pct > 1:
+            factor_scores['ma20_position'] = {"score": 7, "direction": "above", "value": ma20_diff_pct}
+        elif ma20_diff_pct > 0:
+            factor_scores['ma20_position'] = {"score": 6, "direction": "slight_above", "value": ma20_diff_pct}
+        elif ma20_diff_pct > -1:
+            factor_scores['ma20_position'] = {"score": 5, "direction": "slight_below", "value": ma20_diff_pct}
+        elif ma20_diff_pct > -3:
+            factor_scores['ma20_position'] = {"score": 4, "direction": "below", "value": ma20_diff_pct}
+        elif ma20_diff_pct > -5:
+            factor_scores['ma20_position'] = {"score": 3, "direction": "below", "value": ma20_diff_pct}
+        else:
+            factor_scores['ma20_position'] = {"score": 2, "direction": "strong_below", "value": ma20_diff_pct}
+        
+        # ===== 因子 2: MA20 連續天數 (核心邏輯) =====
+        if days_above >= 3:
+            # 連續 3 天以上站上 → 強烈看多
+            factor_scores['ma20_trend'] = {"score": 9, "direction": "bullish", "days_above": days_above, "signal": "BUY"}
+        elif days_above >= 2:
+            # 連續 2 天站上 → 買進訊號
+            factor_scores['ma20_trend'] = {"score": 8, "direction": "bullish", "days_above": days_above, "signal": "BUY"}
+        elif days_above == 1:
+            # 剛站上 1 天 → 觀察
+            factor_scores['ma20_trend'] = {"score": 6, "direction": "neutral", "days_above": days_above, "signal": "WATCH"}
+        elif days_below == 1:
+            # 剛跌破 1 天 → 觀察
+            factor_scores['ma20_trend'] = {"score": 5, "direction": "neutral", "days_below": days_below, "signal": "WATCH"}
+        elif days_below >= 2:
+            # 連續 2 天跌破 → 賣出訊號
+            factor_scores['ma20_trend'] = {"score": 3, "direction": "bearish", "days_below": days_below, "signal": "SELL"}
+        elif days_below >= 3:
+            # 連續 3 天以上跌破 → 強烈看空
+            factor_scores['ma20_trend'] = {"score": 2, "direction": "bearish", "days_below": days_below, "signal": "SELL"}
+        else:
+            # 無明確訊號
+            factor_scores['ma20_trend'] = {"score": 5, "direction": "neutral", "signal": "HOLD"}
+        
+        # ===== 因子 3: VIX 過濾 (風控) =====
+        if vix < 15:
+            factor_scores['vix_filter'] = {"score": 8, "direction": "low_risk", "value": vix}
+        elif vix < 20:
+            factor_scores['vix_filter'] = {"score": 7, "direction": "normal", "value": vix}
+        elif vix < 25:
+            factor_scores['vix_filter'] = {"score": 5, "direction": "elevated", "value": vix}
+        elif vix < 30:
+            factor_scores['vix_filter'] = {"score": 3, "direction": "high", "value": vix}
+        else:
+            # VIX > 30，無論 MA20 訊號如何，都要謹慎
+            factor_scores['vix_filter'] = {"score": 2, "direction": "extreme", "value": vix}
+        
+        # ===== 計算加權總分 =====
+        total = sum(factor_scores[f]['score'] * self.weights[f] for f in self.weights)
+        total = round(total, 1)
+        
+        # ===== 生成交易訊號 =====
+        signal = factor_scores['ma20_trend'].get('signal', 'HOLD')
+        
+        # VIX 過高時覆蓋訊號
+        if vix > 35:
+            signal = "RISK_OFF"
+            total = min(total, 4)  # 強制降低評分
+        
+        return {
+            "total_score": total,
+            "regime": self.get_regime(total),
+            "factor_scores": factor_scores,
+            "weights": self.weights,
+            "signal": signal,
+            "ma20": ma20,
+            "close": close,
+            "days_above_ma20": days_above,
+            "days_below_ma20": days_below
+        }
+    
+    def get_allocation(self, score: float, risk_pref: str = 'neutral') -> Dict[str, Any]:
+        """
+        MA20 策略的配置邏輯 - 更明確的進出場
+        """
+        adj = score
+        if risk_pref == 'conservative': adj -= 1
+        elif risk_pref == 'aggressive': adj += 1
+        adj = max(0, min(10, adj))
+        
+        # MA20 策略的配置更極端（趨勢跟隨特性）
+        if adj <= 2:
+            pct = 0    # 強烈賣出訊號 → 全部出場
+        elif adj <= 3:
+            pct = 10   # 賣出訊號
+        elif adj <= 4:
+            pct = 25
+        elif adj <= 5:
+            pct = 40   # 中性觀望
+        elif adj <= 6:
+            pct = 55
+        elif adj <= 7:
+            pct = 70   # 買進訊號
+        elif adj <= 8:
+            pct = 85   # 強烈買進
+        else:
+            pct = 95   # 連續多天站上 → 高度持倉
+        
+        return {
+            "qqq_pct": pct,
+            "cash_pct": 100 - pct,
+            "qqq_amount": int(self.capital * pct / 100),
+            "cash_amount": int(self.capital * (100 - pct) / 100)
+        }
+
+
+# ============================================
+# 策略註冊表
+# ============================================
+
+STRATEGIES = {
+    'default': DefaultStrategy,
+    'ma20': MA20Strategy,
+}
+
+
+def get_strategy(name: str, config: Dict = None) -> BaseStrategy:
+    """取得策略實例"""
+    if name not in STRATEGIES:
+        available = list(STRATEGIES.keys())
+        print(f"⚠️ 未知策略: {name}，可用策略: {available}")
+        print(f"  使用預設策略: default")
+        name = 'default'
+    
+    strategy_class = STRATEGIES[name]
+    return strategy_class(config)
 
 
 # ============================================
@@ -307,13 +567,15 @@ class TelegramNotifier:
 
 
 # ============================================
-# 每日分析 (Daily Analysis)
+# 每日分析
 # ============================================
 
-def run_daily_analysis():
-    """每日盤後分析 - 每日 22:30 執行"""
+def run_daily_analysis(strategy_name: str = None):
+    """每日盤後分析"""
+    strategy_name = strategy_name or Config.STRATEGY
+    
     print("\n" + "="*60)
-    print("🚀 QQQ 每日分析 (Daily Analysis)")
+    print(f"🚀 QQQ 每日分析 (策略: {strategy_name})")
     print("="*60)
     
     # 1. 抓取數據
@@ -327,47 +589,76 @@ def run_daily_analysis():
     technicals = TechnicalAnalyzer.analyze("QQQ", market_data['qqq']['close'])
     market_data['technicals'] = technicals
     
-    # 3. 因子評分
-    print("\n🎯 因子評分...")
-    scorer = FactorScorer()
-    factor_scores = scorer.score_all(market_data)
-    total_score = scorer.total_score(factor_scores)
-    allocation = scorer.get_allocation(total_score)
+    # 顯示 MA20 相關資訊
+    if 'ma20' in technicals:
+        print(f"  ✓ MA20: ${technicals['ma20']}")
+        print(f"  ✓ 價格 vs MA20: {technicals.get('ma20_diff_pct', 0):+.2f}%")
+        days_above = technicals.get('consecutive_days_above_ma20', 0)
+        days_below = technicals.get('consecutive_days_below_ma20', 0)
+        if days_above > 0:
+            print(f"  ✓ 連續站上 MA20: {days_above} 天")
+        elif days_below > 0:
+            print(f"  ✓ 連續跌破 MA20: {days_below} 天")
     
+    # 3. 取得策略並評分
+    print(f"\n🎯 策略評分 ({strategy_name})...")
+    strategy = get_strategy(strategy_name)
+    score_result = strategy.score(market_data)
+    
+    total_score = score_result['total_score']
+    regime = score_result['regime']
+    factor_scores = score_result['factor_scores']
+    
+    # 顯示因子評分
     for factor, score_data in factor_scores.items():
-        weighted = score_data['score'] * Config.DEFAULT_WEIGHTS[factor]
-        print(f"  • {factor}: {score_data['score']}/10 → {weighted:.2f}")
+        weight = score_result.get('weights', {}).get(factor, 0)
+        weighted = score_data['score'] * weight
+        print(f"  • {factor}: {score_data['score']}/10 (權重: {weight}) → {weighted:.2f}")
     print(f"  總分: {total_score}/10")
     
-    # 4. 判斷狀態
-    regime = 'defense' if total_score <= 3.5 else 'offense' if total_score >= 6.5 else 'neutral'
+    # MA20 策略額外顯示交易訊號
+    if strategy_name == 'ma20':
+        signal = score_result.get('signal', 'HOLD')
+        signal_emoji = {'BUY': '🟢 買進', 'SELL': '🔴 賣出', 'HOLD': '🟡 持有', 'WATCH': '👀 觀察', 'RISK_OFF': '⚠️ 風控'}
+        print(f"  訊號: {signal_emoji.get(signal, signal)}")
+    
+    # 4. 計算配置
+    allocation = strategy.get_allocation(total_score, Config.RISK_PREFERENCE)
+    
+    # 5. 判斷狀態
     regime_text = {'offense': '🟢 進攻', 'neutral': '🟡 中性', 'defense': '🔴 防禦'}
     
-    # 5. 生成輸出
+    # 6. 生成輸出
     now = datetime.now()
     close = market_data['qqq']['close']
     change = market_data['qqq']['change_pct']
     vix = market_data['vix']['value']
     
     output = {
-        "meta": {"version": "3.0", "generated_at": now.isoformat(), "mode": "daily_analysis"},
+        "meta": {"version": "4.0", "generated_at": now.isoformat(), "mode": "daily_analysis", "strategy": strategy_name},
         "date": now.strftime("%Y-%m-%d"),
         "weekday": ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][now.weekday()],
         "ticker": "QQQ",
+        "strategy": strategy_name,
         "market_data": {
             "close": close, "change_pct": change,
             "volume_vs_20ma": technicals.get('volume_ratio'),
             "vix": vix, "vix_change_pct": market_data['vix'].get('change_pct'),
             "us10y": market_data['us10y']['value'],
             "us2y": market_data.get('us2y', {}).get('value'),
-            "dxy": market_data['dxy']['value']
+            "dxy": market_data['dxy']['value'],
+            "ma20": technicals.get('ma20'),
+            "ma20_diff_pct": technicals.get('ma20_diff_pct'),
+            "days_above_ma20": technicals.get('consecutive_days_above_ma20', 0),
+            "days_below_ma20": technicals.get('consecutive_days_below_ma20', 0)
         },
         "technicals": technicals,
         "scoring": {
-            "weights": Config.DEFAULT_WEIGHTS,
+            "weights": score_result.get('weights', {}),
             "factor_scores": factor_scores,
             "total_score": total_score,
-            "regime": regime
+            "regime": regime,
+            "signal": score_result.get('signal')
         },
         "allocation": allocation,
         "risk_management": {
@@ -383,21 +674,43 @@ def run_daily_analysis():
     
     # 通知文字
     alert_text = "\n\n⚠️ *風控警報！*" if output['risk_management']['triggered'] else ""
-    output['notification'] = f"""📊 *QQQ 盤後報告* {output['date']}
+    
+    # MA20 策略的特別通知格式
+    if strategy_name == 'ma20':
+        signal = score_result.get('signal', 'HOLD')
+        signal_text = {'BUY': '🟢 買進訊號', 'SELL': '🔴 賣出訊號', 'HOLD': '🟡 持有', 'WATCH': '👀 觀察', 'RISK_OFF': '⚠️ 風控減碼'}
+        ma20_val = technicals.get('ma20', 0)
+        days_above = technicals.get('consecutive_days_above_ma20', 0)
+        days_below = technicals.get('consecutive_days_below_ma20', 0)
+        
+        position_text = f"連續 {days_above} 天站上" if days_above > 0 else f"連續 {days_below} 天跌破" if days_below > 0 else "剛觸及"
+        
+        output['notification'] = f"""📊 *QQQ MA20策略報告* {output['date']}
+
+*市場* | ${close} ({'+' if change >= 0 else ''}{change:.2f}%)
+*MA20* | ${ma20_val:.2f} ({position_text})
+*VIX* | {vix:.1f}
+
+*訊號* | {signal_text.get(signal, signal)}
+*評分* | {total_score}/10 {regime_text.get(regime)}
+*配置* | QQQ {allocation['qqq_pct']}% / 現金 {allocation['cash_pct']}%
+*止損* | ${output['risk_management']['stop_loss']['price']}{alert_text}"""
+    else:
+        output['notification'] = f"""📊 *QQQ 盤後報告* {output['date']}
 
 *市場* | ${close} ({'+' if change >= 0 else ''}{change:.2f}%) | VIX: {vix:.1f}
 *評分* | {total_score}/10 {regime_text.get(regime)}
 *配置* | QQQ {allocation['qqq_pct']}% / 現金 {allocation['cash_pct']}%
 *止損* | ${output['risk_management']['stop_loss']['price']}{alert_text}"""
     
-    # 6. 儲存
+    # 7. 儲存
     with open('output.json', 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
     
-    # 7. 發送到 GAS
+    # 8. 發送到 GAS
     print("\n📤 發送到 Google Sheets...")
     GASClient.send('daily_log', output)
-    GASClient.send('factor_scores', {'date': output['date'], 'factor_scores': factor_scores, 'weights': Config.DEFAULT_WEIGHTS})
+    GASClient.send('factor_scores', {'date': output['date'], 'factor_scores': factor_scores, 'weights': score_result.get('weights', {}), 'strategy': strategy_name})
     
     if output['risk_management']['triggered']:
         GASClient.send('risk_event', {
@@ -406,7 +719,7 @@ def run_daily_analysis():
             'threshold': 'VIX>40 or Drop>4%', 'action_taken': 'notification_sent'
         })
     
-    # 8. Telegram
+    # 9. Telegram
     print("\n📱 發送通知...")
     TelegramNotifier.send(output['notification'])
     
@@ -417,11 +730,11 @@ def run_daily_analysis():
 
 
 # ============================================
-# 每日驗證 (Daily Validation)
+# 每日驗證
 # ============================================
 
 def run_daily_validation():
-    """每日驗證 - 每日 09:35 執行，驗證前日預測"""
+    """每日驗證 - 每日 09:35 執行"""
     print("\n" + "="*60)
     print("🔍 QQQ 每日驗證 (Daily Validation)")
     print("="*60)
@@ -434,26 +747,20 @@ def run_daily_validation():
     
     if isinstance(history, dict) and 'error' in history:
         print(f"  ❌ 無法讀取歷史數據: {history['error']}")
-        # 嘗試使用本地備份或跳過
         return None
     
-    if not history or len(history) < 1:
+    if not history or not isinstance(history, list) or len(history) < 1:
         print("  ⚠️ 無歷史數據可驗證")
         return None
     
-    # 找到最近一筆記錄（前日預測）
-    # 注意：history 可能是 list 或有 error
-    if isinstance(history, list) and len(history) > 0:
-        prev_record = history[-1]  # 最後一筆是最新的
-    else:
-        print("  ⚠️ 歷史數據格式不正確")
-        return None
-    
+    prev_record = history[-1]
     prev_date = prev_record.get('date', 'Unknown')
     prev_prediction = prev_record.get('prediction', prev_record.get('next_day_bias', 'neutral'))
     prev_close = float(prev_record.get('close', 0))
+    prev_strategy = prev_record.get('strategy', 'default')
     
     print(f"  前日日期: {prev_date}")
+    print(f"  前日策略: {prev_strategy}")
     print(f"  前日預測: {prev_prediction}")
     print(f"  前日收盤: ${prev_close}")
     
@@ -479,7 +786,6 @@ def run_daily_validation():
     else:
         actual_direction = 'neutral'
     
-    # 預測正確的判斷邏輯
     is_correct = False
     if prev_prediction == actual_direction:
         is_correct = True
@@ -495,7 +801,7 @@ def run_daily_validation():
     print(f"  實際方向: {actual_direction}")
     print(f"  預測正確: {'✅ 是' if is_correct else '❌ 否'}")
     
-    # 4. 計算 PnL（假設按配置持有）
+    # 4. 計算 PnL
     prev_qqq_pct = float(prev_record.get('qqq_pct', 50))
     pnl_pct = today_change * (prev_qqq_pct / 100)
     pnl_amount = Config.INITIAL_CAPITAL * (pnl_pct / 100)
@@ -508,6 +814,7 @@ def run_daily_validation():
     validation_record = {
         "date": today.strftime("%Y-%m-%d"),
         "prediction_date": prev_date,
+        "strategy": prev_strategy,
         "predicted_direction": prev_prediction,
         "actual_direction": actual_direction,
         "actual_change_pct": today_change,
@@ -527,7 +834,7 @@ def run_daily_validation():
     result_emoji = "✅" if is_correct else "❌"
     notification = f"""🔍 *QQQ 預測驗證* {today.strftime("%Y-%m-%d")}
 
-*前日預測* ({prev_date})
+*前日預測* ({prev_date}) [{prev_strategy}]
 方向: {prev_prediction}
 配置: QQQ {prev_qqq_pct}%
 
@@ -548,29 +855,26 @@ def run_daily_validation():
         json.dump(validation_record, f, ensure_ascii=False, indent=2)
     
     print("\n✅ 每日驗證完成！")
-    print(json.dumps(validation_record, ensure_ascii=False, indent=2))
     
     return validation_record
 
 
 # ============================================
-# 週末覆盤 (Weekly Review)
+# 週末覆盤
 # ============================================
 
 def run_weekly_review():
-    """週末覆盤 - 每週六 10:00 執行"""
+    """週末覆盤"""
     print("\n" + "="*60)
     print("📊 QQQ 週末覆盤 (Weekly Review)")
     print("="*60)
     
     today = datetime.now()
     
-    # 計算本週範圍（週一到週五）
-    # 找到本週六，往前推到週一
     days_since_monday = today.weekday()
-    if today.weekday() == 5:  # 週六
+    if today.weekday() == 5:
         days_since_monday = 5
-    elif today.weekday() == 6:  # 週日
+    elif today.weekday() == 6:
         days_since_monday = 6
     
     week_start = (today - timedelta(days=days_since_monday)).strftime("%Y-%m-%d")
@@ -578,8 +882,6 @@ def run_weekly_review():
     
     print(f"\n📅 覆盤週期: {week_start} ~ {week_end}")
     
-    # 1. 從 GAS 取得本週數據
-    print("\n📥 讀取本週數據...")
     history = GASClient.get('history', {'days': 7})
     
     if isinstance(history, dict) and 'error' in history:
@@ -590,7 +892,6 @@ def run_weekly_review():
         print("  ⚠️ 無數據可覆盤")
         return None
     
-    # 過濾本週數據
     week_data = [r for r in history if week_start <= r.get('date', '') <= week_end]
     
     if len(week_data) < 1:
@@ -599,22 +900,13 @@ def run_weekly_review():
     
     print(f"  本週交易日: {len(week_data)} 天")
     
-    # 2. 計算績效指標
-    print("\n📈 計算績效指標...")
-    
-    # 取得本週價格變化
-    qqq_hist = MarketDataFetcher.fetch_historical("QQQ", "1mo")
-    if qqq_hist.empty:
-        print("  ❌ 無法取得價格歷史")
-        return None
-    
-    # 本週收益率
-    week_returns = []
+    # 計算績效
     daily_pnls = []
     correct_predictions = 0
     total_predictions = 0
+    week_returns = []
     
-    for i, record in enumerate(week_data):
+    for record in week_data:
         try:
             change_pct = float(record.get('change_pct', 0))
             qqq_pct = float(record.get('qqq_pct', 50))
@@ -622,7 +914,6 @@ def run_weekly_review():
             daily_pnls.append(daily_pnl)
             week_returns.append(change_pct)
             
-            # 檢查預測準確度
             prediction = record.get('prediction', record.get('next_day_bias', ''))
             if prediction:
                 total_predictions += 1
@@ -633,22 +924,17 @@ def run_weekly_review():
         except:
             continue
     
-    # 週報酬
     week_return = sum(daily_pnls)
-    
-    # 勝率
     win_days = len([p for p in daily_pnls if p > 0])
     lose_days = len([p for p in daily_pnls if p < 0])
     win_rate = (win_days / len(daily_pnls) * 100) if daily_pnls else 0
     
-    # 盈虧比
     gains = [p for p in daily_pnls if p > 0]
     losses = [p for p in daily_pnls if p < 0]
     avg_gain = sum(gains) / len(gains) if gains else 0
     avg_loss = abs(sum(losses) / len(losses)) if losses else 1
     profit_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else 0
     
-    # 最大回撤
     cumulative = []
     cum_sum = 0
     for p in daily_pnls:
@@ -664,44 +950,13 @@ def run_weekly_review():
         if drawdown > max_drawdown:
             max_drawdown = drawdown
     
-    # 預測準確率
     prediction_accuracy = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
-    
-    # QQQ 本週表現（用於計算 Alpha）
     qqq_week_return = sum(week_returns) if week_returns else 0
     alpha = week_return - qqq_week_return
     
-    print(f"  週報酬: {week_return:+.2f}%")
-    print(f"  勝率: {win_rate:.1f}% ({win_days}勝 {lose_days}敗)")
-    print(f"  盈虧比: {profit_loss_ratio:.2f}")
-    print(f"  最大回撤: {max_drawdown:.2f}%")
-    print(f"  預測準確率: {prediction_accuracy:.1f}%")
-    print(f"  Alpha: {alpha:+.2f}%")
-    
-    # 3. 計算起始/結束淨值
     starting_nav = Config.INITIAL_CAPITAL
     ending_nav = starting_nav * (1 + week_return / 100)
     
-    # 4. 權重變動分析
-    weight_changes = {}
-    if len(week_data) >= 2:
-        first_scores = week_data[0].get('factor_scores', {})
-        last_scores = week_data[-1].get('factor_scores', {})
-        
-        if isinstance(first_scores, str):
-            try: first_scores = json.loads(first_scores)
-            except: first_scores = {}
-        if isinstance(last_scores, str):
-            try: last_scores = json.loads(last_scores)
-            except: last_scores = {}
-        
-        for factor in Config.DEFAULT_WEIGHTS.keys():
-            first_score = first_scores.get(factor, {}).get('score', 5)
-            last_score = last_scores.get(factor, {}).get('score', 5)
-            if first_score != last_score:
-                weight_changes[factor] = {"from": first_score, "to": last_score, "change": last_score - first_score}
-    
-    # 5. 生成週報
     weekly_review = {
         "week_start": week_start,
         "week_end": week_end,
@@ -719,16 +974,20 @@ def run_weekly_review():
         "prediction_accuracy": round(prediction_accuracy, 1),
         "correct_predictions": correct_predictions,
         "total_predictions": total_predictions,
-        "weight_changes": weight_changes,
-        "review_notes": "",
         "generated_at": today.isoformat()
     }
     
-    # 6. 發送到 GAS
+    print(f"\n📈 績效指標:")
+    print(f"  週報酬: {week_return:+.2f}%")
+    print(f"  Alpha: {alpha:+.2f}%")
+    print(f"  勝率: {win_rate:.0f}%")
+    print(f"  預測準確率: {prediction_accuracy:.0f}%")
+    
+    # 發送到 GAS
     print("\n📤 記錄週報...")
     GASClient.send('weekly_review', weekly_review)
     
-    # 7. 發送 Telegram 通知
+    # Telegram 通知
     perf_emoji = "📈" if week_return > 0 else "📉" if week_return < 0 else "➖"
     alpha_emoji = "🏆" if alpha > 0 else "😔" if alpha < 0 else "➖"
     
@@ -756,12 +1015,10 @@ Alpha: {alpha:+.2f}% {alpha_emoji}
     print("\n📱 發送通知...")
     TelegramNotifier.send(notification)
     
-    # 8. 儲存
     with open('weekly_review.json', 'w', encoding='utf-8') as f:
         json.dump(weekly_review, f, ensure_ascii=False, indent=2)
     
     print("\n✅ 週末覆盤完成！")
-    print(json.dumps(weekly_review, ensure_ascii=False, indent=2))
     
     return weekly_review
 
@@ -771,19 +1028,27 @@ Alpha: {alpha:+.2f}% {alpha_emoji}
 # ============================================
 
 def main():
-    parser = argparse.ArgumentParser(description='QQQ Decision System v3.0')
+    parser = argparse.ArgumentParser(description='QQQ Decision System v4.0')
+    parser.add_argument('--strategy', type=str, default=None, help='策略名稱 (default, ma20)')
     parser.add_argument('--validate', action='store_true', help='執行每日驗證')
     parser.add_argument('--weekly', action='store_true', help='執行週末覆盤')
     parser.add_argument('--all', action='store_true', help='執行所有功能（測試用）')
+    parser.add_argument('--list-strategies', action='store_true', help='列出所有可用策略')
     args = parser.parse_args()
+    
+    if args.list_strategies:
+        print("\n📋 可用策略:")
+        for name, cls in STRATEGIES.items():
+            print(f"  • {name}: {cls.description}")
+        return
     
     print(f"\n⏰ 執行時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"🔧 GAS: {'✓' if Config.GAS_URL else '✗'}")
     print(f"📱 Telegram: {'✓' if Config.TELEGRAM_BOT_TOKEN else '✗'}")
+    print(f"📊 策略: {args.strategy or Config.STRATEGY}")
     
     if args.all:
-        # 測試模式：執行所有功能
-        run_daily_analysis()
+        run_daily_analysis(args.strategy)
         run_daily_validation()
         run_weekly_review()
     elif args.validate:
@@ -791,8 +1056,7 @@ def main():
     elif args.weekly:
         run_weekly_review()
     else:
-        # 預設：每日分析
-        run_daily_analysis()
+        run_daily_analysis(args.strategy)
 
 
 if __name__ == "__main__":

@@ -711,7 +711,11 @@ class ParameterOptimizer:
             params = {'weights': weights}
             strategy = DefaultStrategy(params)
             result = self.engine.run(strategy)
-            
+            # 將所有指標標準化為 0~1 或相似量級
+            # win_rate: 60% -> 0.6
+            # max_drawdown: 10% -> 0.1
+            # sharpe: 除以 3 (假設 3 為極優秀)
+            # alpha: 使用小數點 (0.05 代表 5%)
             composite = (
                 result.alpha * 0.30 +
                 result.sharpe_ratio * 0.25 +

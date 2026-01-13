@@ -2,7 +2,7 @@ name: QQQ Daily Analysis
 
 on:
   schedule:
-    - cron: '30 14 * * 1-5'
+    - cron: '15 21 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:

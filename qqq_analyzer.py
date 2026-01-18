@@ -645,144 +645,155 @@ def run_weekly_review():
     print("\n📥 獲取本週數據...")
     result = GASClient.get('history', {'days': 7})
     
-    if result.get('error') or not result.get('data'):
+    # 處理不同的返回格式
+    if isinstance(result, dict):
+        if result.get('error'):
+            print(f"❌ 獲取數據錯誤: {result.get('error')}")
+            return
+        history = result.get('data', [])
+    elif isinstance(result, list):
+        history = result
+    else:
         print("❌ 無法獲取歷史數據")
         return
     
-    history = result['data']
-    if len(history) < 2:
-        print("⚠️ 數據不足，需要至少2天數據")
+    if not history or len(history) < 2:
+        print(f"⚠️ 數據不足，需要至少2天數據 (目前: {len(history) if history else 0})")
         return
     
     print(f"  ✓ 獲取 {len(history)} 天數據")
     
-    # 計算週報酬率
-    week_start_price = float(history[0].get('close', 0))
-    week_end_price = float(history[-1].get('close', 0))
-    week_return = ((week_end_price - week_start_price) / week_start_price * 100) if week_start_price > 0 else 0
-    
-    # 計算基準報酬（假設持有100% QQQ）
-    benchmark_return = week_return
-    
-    # 計算策略報酬（根據每日配置加權）
-    strategy_return = 0
-    for i, day in enumerate(history[:-1]):
-        qqq_pct = float(day.get('qqq_pct', 50)) / 100
-        next_day_return = 0
-        if i + 1 < len(history):
-            today_close = float(day.get('close', 0))
-            next_close = float(history[i + 1].get('close', 0))
-            if today_close > 0:
-                next_day_return = ((next_close - today_close) / today_close) * qqq_pct * 100
-        strategy_return += next_day_return
-    
-    # Alpha = 策略報酬 - 基準報酬
-    alpha = strategy_return - benchmark_return
-    
-    # 勝率計算
-    correct_predictions = 0
-    total_predictions = 0
-    
-    for i, day in enumerate(history[:-1]):
-        prediction = day.get('prediction') or day.get('next_day_bias', 'neutral')
-        if i + 1 < len(history):
-            actual_change = float(history[i + 1].get('change_pct', 0))
-            
-            if prediction == 'bullish' and actual_change > 0:
-                correct_predictions += 1
-            elif prediction == 'bearish' and actual_change < 0:
-                correct_predictions += 1
-            elif prediction == 'neutral' and abs(actual_change) < 0.5:
-                correct_predictions += 1
-            
-            total_predictions += 1
-    
-    win_rate = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
-    
-    # 盈虧比計算
-    profits = []
-    losses = []
-    
-    for day in history:
-        change = float(day.get('change_pct', 0))
-        qqq_pct = float(day.get('qqq_pct', 50)) / 100
-        pnl = change * qqq_pct
+    try:
+        # 計算週報酬率
+        week_start_price = float(history[0].get('close', 0))
+        week_end_price = float(history[-1].get('close', 0))
+        week_return = ((week_end_price - week_start_price) / week_start_price * 100) if week_start_price > 0 else 0
         
-        if pnl > 0:
-            profits.append(pnl)
-        elif pnl < 0:
-            losses.append(abs(pnl))
-    
-    avg_profit = sum(profits) / len(profits) if profits else 0
-    avg_loss = sum(losses) / len(losses) if losses else 1
-    profit_loss_ratio = avg_profit / avg_loss if avg_loss > 0 else 0
-    
-    # 計算平均評分
-    avg_score = sum(float(d.get('total_score', 5)) for d in history) / len(history)
-    
-    # 計算配置統計
-    avg_qqq_pct = sum(float(d.get('qqq_pct', 50)) for d in history) / len(history)
-    
-    # 風險指標
-    max_drawdown = 0
-    peak = float(history[0].get('close', 0))
-    
-    for day in history:
-        price = float(day.get('close', 0))
-        if price > peak:
-            peak = price
-        drawdown = ((peak - price) / peak * 100) if peak > 0 else 0
-        if drawdown > max_drawdown:
-            max_drawdown = drawdown
-    
-    # VIX 統計
-    avg_vix = sum(float(d.get('vix', 20)) for d in history) / len(history)
-    max_vix = max(float(d.get('vix', 20)) for d in history)
-    
-    # 組合週報數據
-    now = datetime.now()
-    week_start = history[0].get('date', '')
-    week_end = history[-1].get('date', '')
-    
-    weekly_data = {
-        "date": now.strftime("%Y-%m-%d"),
-        "week_start": week_start,
-        "week_end": week_end,
-        "week_return": round(week_return, 2),
-        "strategy_return": round(strategy_return, 2),
-        "benchmark_return": round(benchmark_return, 2),
-        "alpha": round(alpha, 2),
-        "win_rate": round(win_rate, 1),
-        "correct_predictions": correct_predictions,
-        "total_predictions": total_predictions,
-        "profit_loss_ratio": round(profit_loss_ratio, 2),
-        "avg_score": round(avg_score, 1),
-        "avg_qqq_allocation": round(avg_qqq_pct, 1),
-        "max_drawdown": round(max_drawdown, 2),
-        "avg_vix": round(avg_vix, 1),
-        "max_vix": round(max_vix, 1),
-        "trading_days": len(history)
-    }
-    
-    # 輸出報告
-    print("\n" + "="*60)
-    print(f"📈 週報酬: {week_return:+.2f}%")
-    print(f"🎯 策略報酬: {strategy_return:+.2f}%")
-    print(f"📊 Alpha: {alpha:+.2f}%")
-    print(f"✅ 勝率: {win_rate:.1f}% ({correct_predictions}/{total_predictions})")
-    print(f"💰 盈虧比: {profit_loss_ratio:.2f}")
-    print(f"⭐ 平均評分: {avg_score:.1f}/10")
-    print(f"📍 平均配置: QQQ {avg_qqq_pct:.1f}%")
-    print(f"⚠️ 最大回撤: {max_drawdown:.2f}%")
-    print(f"📉 VIX範圍: {avg_vix:.1f} (最高: {max_vix:.1f})")
-    print("="*60)
-    
-    # 發送到 Google Sheets
-    print("\n📤 發送週報到 Google Sheets...")
-    GASClient.send('weekly_review', weekly_data)
-    
-    # Telegram 通知
-    notification = f"""📊 *QQQ 週報* ({week_start} ~ {week_end})
+        # 計算基準報酬（假設持有100% QQQ）
+        benchmark_return = week_return
+        
+        # 計算策略報酬（根據每日配置加權）
+        strategy_return = 0
+        for i, day in enumerate(history[:-1]):
+            qqq_pct = float(day.get('qqq_pct', 50)) / 100
+            next_day_return = 0
+            if i + 1 < len(history):
+                today_close = float(day.get('close', 0))
+                next_close = float(history[i + 1].get('close', 0))
+                if today_close > 0:
+                    next_day_return = ((next_close - today_close) / today_close) * qqq_pct * 100
+            strategy_return += next_day_return
+        
+        # Alpha = 策略報酬 - 基準報酬
+        alpha = strategy_return - benchmark_return
+        
+        # 勝率計算
+        correct_predictions = 0
+        total_predictions = 0
+        
+        for i, day in enumerate(history[:-1]):
+            prediction = day.get('prediction') or day.get('next_day_bias', 'neutral')
+            if i + 1 < len(history):
+                actual_change = float(history[i + 1].get('change_pct', 0))
+                
+                if prediction == 'bullish' and actual_change > 0:
+                    correct_predictions += 1
+                elif prediction == 'bearish' and actual_change < 0:
+                    correct_predictions += 1
+                elif prediction == 'neutral' and abs(actual_change) < 0.5:
+                    correct_predictions += 1
+                
+                total_predictions += 1
+        
+        win_rate = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
+        
+        # 盈虧比計算
+        profits = []
+        losses = []
+        
+        for day in history:
+            change = float(day.get('change_pct', 0))
+            qqq_pct = float(day.get('qqq_pct', 50)) / 100
+            pnl = change * qqq_pct
+            
+            if pnl > 0:
+                profits.append(pnl)
+            elif pnl < 0:
+                losses.append(abs(pnl))
+        
+        avg_profit = sum(profits) / len(profits) if profits else 0
+        avg_loss = sum(losses) / len(losses) if losses else 1
+        profit_loss_ratio = avg_profit / avg_loss if avg_loss > 0 else 0
+        
+        # 計算平均評分
+        scores = [float(d.get('total_score', 5)) for d in history if d.get('total_score')]
+        avg_score = sum(scores) / len(scores) if scores else 5.0
+        
+        # 計算配置統計
+        allocations = [float(d.get('qqq_pct', 50)) for d in history if d.get('qqq_pct')]
+        avg_qqq_pct = sum(allocations) / len(allocations) if allocations else 50.0
+        
+        # 風險指標
+        max_drawdown = 0
+        peak = float(history[0].get('close', 0))
+        
+        for day in history:
+            price = float(day.get('close', 0))
+            if price > peak:
+                peak = price
+            drawdown = ((peak - price) / peak * 100) if peak > 0 else 0
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+        
+        # VIX 統計
+        vix_values = [float(d.get('vix', 20)) for d in history if d.get('vix')]
+        avg_vix = sum(vix_values) / len(vix_values) if vix_values else 20.0
+        max_vix = max(vix_values) if vix_values else 20.0
+        
+        # 組合週報數據
+        now = datetime.now()
+        week_start = history[0].get('date', '')
+        week_end = history[-1].get('date', '')
+        
+        weekly_data = {
+            "date": now.strftime("%Y-%m-%d"),
+            "week_start": week_start,
+            "week_end": week_end,
+            "week_return": round(week_return, 2),
+            "strategy_return": round(strategy_return, 2),
+            "benchmark_return": round(benchmark_return, 2),
+            "alpha": round(alpha, 2),
+            "win_rate": round(win_rate, 1),
+            "correct_predictions": correct_predictions,
+            "total_predictions": total_predictions,
+            "profit_loss_ratio": round(profit_loss_ratio, 2),
+            "avg_score": round(avg_score, 1),
+            "avg_qqq_allocation": round(avg_qqq_pct, 1),
+            "max_drawdown": round(max_drawdown, 2),
+            "avg_vix": round(avg_vix, 1),
+            "max_vix": round(max_vix, 1),
+            "trading_days": len(history)
+        }
+        
+        # 輸出報告
+        print("\n" + "="*60)
+        print(f"📈 週報酬: {week_return:+.2f}%")
+        print(f"🎯 策略報酬: {strategy_return:+.2f}%")
+        print(f"📊 Alpha: {alpha:+.2f}%")
+        print(f"✅ 勝率: {win_rate:.1f}% ({correct_predictions}/{total_predictions})")
+        print(f"💰 盈虧比: {profit_loss_ratio:.2f}")
+        print(f"⭐ 平均評分: {avg_score:.1f}/10")
+        print(f"📍 平均配置: QQQ {avg_qqq_pct:.1f}%")
+        print(f"⚠️ 最大回撤: {max_drawdown:.2f}%")
+        print(f"📉 VIX範圍: {avg_vix:.1f} (最高: {max_vix:.1f})")
+        print("="*60)
+        
+        # 發送到 Google Sheets
+        print("\n📤 發送週報到 Google Sheets...")
+        GASClient.send('weekly_review', weekly_data)
+        
+        # Telegram 通知
+        notification = f"""📊 *QQQ 週報* ({week_start} ~ {week_end})
 
 *績效表現*
 週報酬: {week_return:+.2f}%
@@ -799,12 +810,19 @@ Alpha: {alpha:+.2f}%
 最大回撤: {max_drawdown:.2f}%
 平均VIX: {avg_vix:.1f}
 """
-    
-    print("\n📱 發送通知...")
-    TelegramNotifier.send(notification)
-    
-    print("\n✅ 週報分析完成！")
-    return weekly_data
+        
+        print("\n📱 發送通知...")
+        TelegramNotifier.send(notification)
+        
+        print("\n✅ 週報分析完成！")
+        return weekly_data
+        
+    except Exception as e:
+        print(f"❌ 週報分析錯誤: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 
 # ============================================
 # 主程式

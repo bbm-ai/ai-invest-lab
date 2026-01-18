@@ -50,3 +50,10 @@ node_modules/
 dist/
 .env
 logs/
+
+# 優化結果（會通過 workflow 提交）
+# optimization_results.json
+
+# 臨時文件
+*.tmp
+.DS_Store

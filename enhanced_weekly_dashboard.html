@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQQ 週報分析</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0f1c;
+            color: #f9fafb;
+            padding: 24px;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        header {
+            margin-bottom: 32px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #9ca3af;
+            font-size: 0.95rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .card {
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 24px;
+        }
+
+        .card-title {
+            font-size: 0.85rem;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+        }
+
+        .metric-big {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: #6b7280;
+        }
+
+        .positive { color: #10b981; }
+        .negative { color: #ef4444; }
+        .neutral { color: #f59e0b; }
+
+        .chart-container {
+            height: 300px;
+            margin-top: 16px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .stats-row:last-child { border-bottom: none; }
+
+        .stat-label { color: #9ca3af; font-size: 0.9rem; }
+        .stat-value { font-weight: 600; font-size: 1.1rem; }
+
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 32px 0 16px;
+        }
+
+        .recommendation {
+            background: linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1));
+            border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .recommendation h3 {
+            color: #3b82f6;
+            margin-bottom: 12px;
+        }
+
+        .recommendation ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .recommendation li {
+            padding: 8px 0;
+            padding-left: 24px;
+            position: relative;
+        }
+
+        .recommendation li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #3b82f6;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            transition: width 0.5s ease;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        th {
+            color: #9ca3af;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        tbody tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 QQQ 週報分析</h1>
+            <p class="subtitle" id="weekRange">載入中...</p>
+        </header>
+
+        <!-- 核心指標 -->
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">週報酬</div>
+                <div class="metric-big" id="weekReturn">--</div>
+                <div class="metric-label">策略報酬 vs 基準</div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Alpha</div>
+                <div class="metric-big" id="alpha">--</div>
+                <div class="metric-label">超額報酬</div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">勝率</div>
+                <div class="metric-big" id="winRate">--</div>
+                <div class="metric-label" id="winStats">-- 勝 / -- 敗</div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">盈虧比</div>
+                <div class="metric-big" id="plRatio">--</div>
+                <div class="metric-label">平均盈利 / 平均虧損</div>
+            </div>
+        </div>
+
+        <!-- 績效圖表 -->
+        <div class="card">
+            <div class="card-title">週度績效走勢</div>
+            <div class="chart-container">
+                <canvas id="performanceChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 詳細統計 -->
+        <h2 class="section-title">📈 詳細統計</h2>
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">風險指標</div>
+                <div class="stats-row">
+                    <span class="stat-label">最大回撤</span>
+                    <span class="stat-value negative" id="maxDrawdown">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">平均 VIX</span>
+                    <span class="stat-value" id="avgVix">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">最高 VIX</span>
+                    <span class="stat-value" id="maxVix">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">配置統計</div>
+                <div class="stats-row">
+                    <span class="stat-label">平均 QQQ 配置</span>
+                    <span class="stat-value positive" id="avgAllocation">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">平均評分</span>
+                    <span class="stat-value" id="avgScore">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">交易天數</span>
+                    <span class="stat-value" id="tradingDays">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">預測準確度</div>
+                <div class="stats-row">
+                    <span class="stat-label">正確預測</span>
+                    <span class="stat-value positive" id="correctPredictions">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">錯誤預測</span>
+                    <span class="stat-value negative" id="wrongPredictions">--</span>
+                </div>
+                <div class="stats-row">
+                    <span class="stat-label">準確率</span>
+                    <span class="stat-value" id="accuracy">--</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="accuracyBar" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 策略建議 -->
+        <div class="recommendation" id="recommendations">
+            <h3>💡 本週建議</h3>
+            <ul id="recommendationList">
+                <li>正在分析...</li>
+            </ul>
+        </div>
+
+        <!-- 歷史週報 -->
+        <h2 class="section-title">📅 歷史週報</h2>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>週期</th>
+                        <th>報酬率</th>
+                        <th>Alpha</th>
+                        <th>勝率</th>
+                        <th>盈虧比</th>
+                        <th>最大回撤</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTable">
+                    <tr><td colspan="6" style="text-align: center; color: #6b7280;">載入中...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const GAS_URL = 'YOUR_GAS_URL_HERE';  // 請替換為您的 GAS URL
+        
+        let performanceChart = null;
+
+        async function loadWeeklyData() {
+            try {
+                const response = await fetch(`${GAS_URL}?action=weekly_reviews&count=12`);
+                const data = await response.json();
+                
+                if (!data || data.length === 0) {
+                    console.error('No weekly data');
+                    return;
+                }
+                
+                // 最新週報
+                const latest = data[data.length - 1];
+                
+                // 更新指標
+                document.getElementById('weekRange').textContent = 
+                    `${latest.week_start || ''} ~ ${latest.week_end || ''}`;
+                
+                const weekReturn = parseFloat(latest.week_return) || 0;
+                document.getElementById('weekReturn').innerHTML = 
+                    `<span class="${weekReturn >= 0 ? 'positive' : 'negative'}">${weekReturn >= 0 ? '+' : ''}${weekReturn.toFixed(2)}%</span>`;
+                
+                const alpha = parseFloat(latest.alpha) || 0;
+                document.getElementById('alpha').innerHTML = 
+                    `<span class="${alpha >= 0 ? 'positive' : 'negative'}">${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}%</span>`;
+                
+                const winRate = parseFloat(latest.win_rate) || 0;
+                document.getElementById('winRate').innerHTML = 
+                    `<span class="${winRate >= 50 ? 'positive' : 'negative'}">${winRate.toFixed(1)}%</span>`;
+                
+                const correctPred = latest.correct_predictions || 0;
+                const totalPred = latest.total_predictions || 1;
+                document.getElementById('winStats').textContent = 
+                    `${correctPred} 勝 / ${totalPred - correctPred} 敗`;
+                
+                const plRatio = parseFloat(latest.profit_loss_ratio) || 0;
+                document.getElementById('plRatio').innerHTML = 
+                    `<span class="${plRatio >= 1 ? 'positive' : 'negative'}">${plRatio.toFixed(2)}</span>`;
+                
+                // 風險指標
+                document.getElementById('maxDrawdown').textContent = 
+                    (parseFloat(latest.max_drawdown) || 0).toFixed(2) + '%';
+                document.getElementById('avgVix').textContent = 
+                    (parseFloat(latest.avg_vix) || 0).toFixed(1);
+                document.getElementById('maxVix').textContent = 
+                    (parseFloat(latest.max_vix) || 0).toFixed(1);
+                
+                // 配置統計
+                document.getElementById('avgAllocation').textContent = 
+                    (parseFloat(latest.avg_qqq_allocation) || 0).toFixed(1) + '%';
+                document.getElementById('avgScore').textContent = 
+                    (parseFloat(latest.avg_score) || 0).toFixed(1) + '/10';
+                document.getElementById('tradingDays').textContent = 
+                    latest.trading_days || 0;
+                
+                // 預測準確度
+                const accuracy = totalPred > 0 ? (correctPred / totalPred * 100) : 0;
+                document.getElementById('correctPredictions').textContent = correctPred;
+                document.getElementById('wrongPredictions').textContent = totalPred - correctPred;
+                document.getElementById('accuracy').textContent = accuracy.toFixed(1) + '%';
+                document.getElementById('accuracyBar').style.width = accuracy + '%';
+                
+                // 生成建議
+                generateRecommendations(latest);
+                
+                // 繪製圖表
+                drawPerformanceChart(data);
+                
+                // 更新歷史表格
+                updateHistoryTable(data);
+                
+            } catch (error) {
+                console.error('Error loading weekly data:', error);
+            }
+        }
+
+        function generateRecommendations(data) {
+            const recommendations = [];
+            
+            const weekReturn = parseFloat(data.week_return) || 0;
+            const alpha = parseFloat(data.alpha) || 0;
+            const winRate = parseFloat(data.win_rate) || 0;
+            const maxDrawdown = parseFloat(data.max_drawdown) || 0;
+            
+            if (alpha > 0) {
+                recommendations.push(`策略表現優於基準 ${alpha.toFixed(2)}%，保持當前參數設定`);
+            } else {
+                recommendations.push(`策略落後基準 ${Math.abs(alpha).toFixed(2)}%，建議檢討參數或策略邏輯`);
+            }
+            
+            if (winRate >= 60) {
+                recommendations.push(`勝率達 ${winRate.toFixed(1)}%，策略預測能力良好`);
+            } else if (winRate < 45) {
+                recommendations.push(`勝率僅 ${winRate.toFixed(1)}%，建議優化預測模型`);
+            }
+            
+            if (maxDrawdown < -5) {
+                recommendations.push(`回撤超過 5%，建議加強風控機制或降低倉位`);
+            }
+            
+            const avgVix = parseFloat(data.avg_vix) || 0;
+            if (avgVix > 25) {
+                recommendations.push(`市場波動較大 (VIX ${avgVix.toFixed(1)})，建議降低風險暴露`);
+            }
+            
+            const plRatio = parseFloat(data.profit_loss_ratio) || 0;
+            if (plRatio < 1) {
+                recommendations.push(`盈虧比 ${plRatio.toFixed(2)} < 1，需改善止損策略`);
+            }
+            
+            const list = document.getElementById('recommendationList');
+            list.innerHTML = recommendations.map(r => `<li>${r}</li>`).join('');
+        }
+
+        function drawPerformanceChart(data) {
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            
+            if (performanceChart) performanceChart.destroy();
+            
+            const labels = data.map(d => d.week_start || '');
+            const strategyReturns = data.map(d => parseFloat(d.strategy_return) || 0);
+            const benchmarkReturns = data.map(d => parseFloat(d.benchmark_return) || 0);
+            
+            performanceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: '策略報酬',
+                            data: strategyReturns,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: '基準報酬',
+                            data: benchmarkReturns,
+                            borderColor: '#6b7280',
+                            backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                            borderDash: [5, 5],
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#6b7280' }
+                        },
+                        y: { 
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#6b7280' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateHistoryTable(data) {
+            const tbody = document.getElementById('historyTable');
+            
+            tbody.innerHTML = data.slice().reverse().map(row => {
+                const weekReturn = parseFloat(row.week_return) || 0;
+                const alpha = parseFloat(row.alpha) || 0;
+                const winRate = parseFloat(row.win_rate) || 0;
+                const plRatio = parseFloat(row.profit_loss_ratio) || 0;
+                const maxDrawdown = parseFloat(row.max_drawdown) || 0;
+                
+                return `
+                    <tr>
+                        <td>${row.week_start} ~ ${row.week_end}</td>
+                        <td class="${weekReturn >= 0 ? 'positive' : 'negative'}">
+                            ${weekReturn >= 0 ? '+' : ''}${weekReturn.toFixed(2)}%
+                        </td>
+                        <td class="${alpha >= 0 ? 'positive' : 'negative'}">
+                            ${alpha >= 0 ? '+' : ''}${alpha.toFixed(2)}%
+                        </td>
+                        <td>${winRate.toFixed(1)}%</td>
+                        <td>${plRatio.toFixed(2)}</td>
+                        <td class="negative">${maxDrawdown.toFixed(2)}%</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 載入數據
+        loadWeeklyData();
+        
+        // 每5分鐘自動刷新
+        setInterval(loadWeeklyData, 5 * 60 * 1000);
+    </script>
+</body>
+</html>

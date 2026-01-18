@@ -1,0 +1,130 @@
+name: QQQ Parameter Optimization
+
+on:
+  # 每月第一個週六執行
+  schedule:
+    - cron: '0 10 1-7 * 6'  # UTC 10:00 on first Saturday of month
+  
+  # 允許手動觸發
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: '策略 (ma20, default, all)'
+        required: false
+        default: 'all'
+      days:
+        description: '回測天數'
+        required: false
+        default: '60'
+      dry_run:
+        description: '模擬執行 (true/false)'
+        required: false
+        default: 'false'
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 🔍 Run optimization
+        env:
+          GAS_URL: ${{ secrets.GAS_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy || 'all' }}"
+          DAYS="${{ github.event.inputs.days || '60' }}"
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+          
+          if [ "$DRY_RUN" == "true" ]; then
+            python auto_optimize.py --strategy $STRATEGY --days $DAYS --dry-run
+          else
+            python auto_optimize.py --strategy $STRATEGY --days $DAYS
+          fi
+      
+      - name: 📊 Generate optimization report
+        if: success()
+        run: |
+          echo "# Optimization Report" > optimization_report.md
+          echo "" >> optimization_report.md
+          echo "**Date:** $(date)" >> optimization_report.md
+          echo "**Strategy:** ${{ github.event.inputs.strategy || 'all' }}" >> optimization_report.md
+          echo "**Days:** ${{ github.event.inputs.days || '60' }}" >> optimization_report.md
+          echo "" >> optimization_report.md
+          
+          if [ -f "optimization_results.json" ]; then
+            echo "## Results" >> optimization_report.md
+            echo '```json' >> optimization_report.md
+            cat optimization_results.json >> optimization_report.md
+            echo '```' >> optimization_report.md
+          fi
+      
+      - name: 💾 Commit updated parameters
+        if: ${{ github.event.inputs.dry_run != 'true' && success() }}
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          if [ -f "optimized_params.json" ]; then
+            git add optimized_params.json
+            git commit -m "🤖 Auto-update optimized parameters - $(date +'%Y-%m-%d')" || echo "No changes to commit"
+            git push || echo "Nothing to push"
+          fi
+      
+      - name: 💾 Upload optimization results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optimization-results-${{ github.run_number }}
+          path: |
+            optimized_params.json
+            optimization_results.json
+            *.log
+            optimization_report.md
+          retention-days: 90
+      
+      - name: 📋 Create Pull Request (for review)
+        if: ${{ github.event.inputs.dry_run != 'true' && success() }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'Update optimized parameters'
+          title: '🤖 Optimized Parameters Update - ${{ github.run_number }}'
+          body: |
+            ## 參數優化結果
+            
+            **執行時間:** ${{ github.run_number }}
+            **策略:** ${{ github.event.inputs.strategy || 'all' }}
+            **回測天數:** ${{ github.event.inputs.days || '60' }}
+            
+            ### 變更內容
+            - 更新 `optimized_params.json`
+            
+            ### 後續步驟
+            1. 查看優化結果
+            2. 驗證參數合理性
+            3. 合併此 PR 以採用新參數
+            
+            ---
+            *此 PR 由 GitHub Actions 自動生成*
+          branch: optimization-update-${{ github.run_number }}
+          delete-branch: true
+          labels: |
+            optimization
+            automated

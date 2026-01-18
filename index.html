@@ -739,105 +739,234 @@
         }
     }
 
-    function updateFactorScores(factorScores) {
-        const container = document.getElementById('factorList');
-        if (!factorScores) {
-            container.innerHTML = '<p style="color: var(--text-muted);">無數據</p>';
-            return;
-        }
-        
-        // Parse if string
-        if (typeof factorScores === 'string') {
-            try { factorScores = JSON.parse(factorScores); } catch(e) { return; }
-        }
-        
-        const factorNames = {
-            'price_momentum': '價格動能',
-            'volume': '成交量',
-            'vix': 'VIX',
-            'bond': '債市',
-            'mag7': '權重股'
-        };
-        
-        const colors = {
-            'price_momentum': 'var(--blue)',
-            'volume': 'var(--purple)',
-            'vix': 'var(--yellow)',
-            'bond': 'var(--green)',
-            'mag7': 'var(--red)'
-        };
-        
-        let html = '';
-        const scores = [];
-        const labels = [];
-        
-        Object.entries(factorScores).forEach(([factor, data]) => {
-            const score = data.score || 5;
-            const name = factorNames[factor] || factor;
-            const color = colors[factor] || 'var(--blue)';
-            const width = (score / 10) * 100;
-            
-            html += `
-                <div class="factor-item">
-                    <span class="factor-name">${name}</span>
-                    <div class="factor-bar-container">
-                        <div class="factor-bar" style="width: ${width}%; background: ${color};"></div>
-                    </div>
-                    <span class="factor-score">${score}</span>
-                </div>
-            `;
-            
-            labels.push(name);
-            scores.push(score);
-        });
-        
-        container.innerHTML = html;
-        
-        // Update Radar Chart
-        updateRadarChart(labels, scores);
+function updateFactorScores(factorScores) {
+    const container = document.getElementById('factorList');
+    
+    console.log('Factor Scores received:', factorScores); // Debug
+    
+    if (!factorScores) {
+        container.innerHTML = '<p style="color: var(--text-muted);">無數據</p>';
+        return;
     }
+    
+    // Parse if string
+    let scores = factorScores;
+    if (typeof factorScores === 'string') {
+        try { 
+            scores = JSON.parse(factorScores); 
+        } catch(e) { 
+            console.error('Failed to parse factor scores:', e);
+            container.innerHTML = '<p style="color: var(--text-muted);">數據格式錯誤</p>';
+            return; 
+        }
+    }
+    
+    // 支援兩種數據格式
+    // 格式1: { price_momentum: { score: 8, direction: "bullish" }, ... }
+    // 格式2: { price_momentum: 8, volume: 7, ... }
+    
+    const factorNames = {
+        'price_momentum': '價格動能',
+        'volume': '成交量',
+        'vix': 'VIX',
+        'bond': '債市',
+        'mag7': '權重股',
+        'ma20_position': 'MA20位置',
+        'ma20_trend': 'MA20趨勢',
+        'vix_filter': 'VIX過濾'
+    };
+    
+    const colors = {
+        'price_momentum': 'var(--blue)',
+        'volume': 'var(--purple)',
+        'vix': 'var(--yellow)',
+        'bond': 'var(--green)',
+        'mag7': 'var(--red)',
+        'ma20_position': 'var(--blue)',
+        'ma20_trend': 'var(--green)',
+        'vix_filter': 'var(--yellow)'
+    };
+    
+    let html = '';
+    const scoreValues = [];
+    const labels = [];
+    
+    Object.entries(scores).forEach(([factor, data]) => {
+        // 取得分數（支援兩種格式）
+        let score = 5;
+        if (typeof data === 'object' && data !== null) {
+            score = data.score || 5;
+        } else if (typeof data === 'number') {
+            score = data;
+        }
+        
+        const name = factorNames[factor] || factor;
+        const color = colors[factor] || 'var(--blue)';
+        const width = (score / 10) * 100;
+        
+        html += `
+            <div class="factor-item">
+                <span class="factor-name">${name}</span>
+                <div class="factor-bar-container">
+                    <div class="factor-bar" style="width: ${width}%; background: ${color};"></div>
+                </div>
+                <span class="factor-score">${score}</span>
+            </div>
+        `;
+        
+        labels.push(name);
+        scoreValues.push(score);
+    });
+    
+    if (html === '') {
+        container.innerHTML = '<p style="color: var(--text-muted);">無因子數據</p>';
+        return;
+    }
+    
+    container.innerHTML = html;
+    
+    // Update Radar Chart
+    updateRadarChart(labels, scoreValues);
+}
 
-    function updateRadarChart(labels, scores) {
-        const ctx = document.getElementById('radarChart').getContext('2d');
-        
-        if (radarChart) radarChart.destroy();
-        
-        radarChart = new Chart(ctx, {
-            type: 'radar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    data: scores,
-                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 2,
-                    pointBackgroundColor: 'rgba(59, 130, 246, 1)',
-                    pointRadius: 4
-                }]
+function updateRadarChart(labels, scores) {
+    const canvas = document.getElementById('radarChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    if (radarChart) {
+        radarChart.destroy();
+        radarChart = null;
+    }
+    
+    if (!labels || labels.length === 0) {
+        console.log('No data for radar chart');
+        return;
+    }
+    
+    radarChart = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: '評分',
+                data: scores,
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                borderColor: 'rgba(59, 130, 246, 1)',
+                borderWidth: 2,
+                pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: 'rgba(59, 130, 246, 1)',
+                pointRadius: 4,
+                pointHoverRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                r: {
+                    min: 0,
+                    max: 10,
+                    beginAtZero: true,
+                    ticks: { 
+                        stepSize: 2,
+                        color: '#6b7280',
+                        backdropColor: 'transparent',
+                        font: { size: 10 }
+                    },
+                    grid: { 
+                        color: 'rgba(255,255,255,0.1)',
+                        circular: true
+                    },
+                    angleLines: {
+                        color: 'rgba(255,255,255,0.1)'
+                    },
+                    pointLabels: { 
+                        color: '#9ca3af',
+                        font: { size: 11 }
+                    }
+                }
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    r: {
-                        min: 0,
-                        max: 10,
-                        ticks: { 
-                            stepSize: 2,
-                            color: '#6b7280',
-                            backdropColor: 'transparent'
-                        },
-                        grid: { color: 'rgba(255,255,255,0.1)' },
-                        pointLabels: { 
-                            color: '#9ca3af',
-                            font: { size: 11 }
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                    titleColor: '#f9fafb',
+                    bodyColor: '#f9fafb',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return context.parsed.r + '/10';
                         }
                     }
-                },
-                plugins: { legend: { display: false } }
+                }
             }
-        });
+        }
+    });
+}
+
+// 在 refreshData 函數中添加更詳細的錯誤處理
+async function refreshData() {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 載入中...';
+    
+    showLoading();
+    
+    try {
+        // Fetch all data in parallel
+        const [latest, history, weeklyReviews, validations] = await Promise.all([
+            fetchAPI('latest'),
+            fetchAPI('history', { days: 30 }),
+            fetchAPI('weekly_reviews', { count: 1 }).catch(err => {
+                console.warn('Failed to fetch weekly reviews:', err);
+                return null;
+            }),
+            fetchAPI('validations', { days: 30 }).catch(err => {
+                console.warn('Failed to fetch validations:', err);
+                return [];
+            })
+        ]);
+        
+        console.log('Latest data:', latest); // Debug
+        
+        if (latest.error) throw new Error(latest.error);
+        
+        // Update all components
+        updateMetricCards(latest);
+        
+        // 特別處理 factor_scores
+        if (latest.factor_scores) {
+            console.log('Updating factor scores with:', latest.factor_scores);
+            updateFactorScores(latest.factor_scores);
+        } else {
+            console.warn('No factor_scores in latest data');
+        }
+        
+        if (Array.isArray(history)) {
+            updatePriceChart(history);
+            updateHistoryTable(history);
+        }
+        
+        updateWeeklyStats(weeklyReviews);
+        updateValidationStats(validations);
+        
+        showContent();
+        
+    } catch (error) {
+        console.error('Error:', error);
+        showError(error.message || '無法連接到伺服器');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 更新';
     }
+}
 
     function updatePriceChart(history) {
         const ctx = document.getElementById('priceChart').getContext('2d');

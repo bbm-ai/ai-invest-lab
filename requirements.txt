@@ -4,3 +4,9 @@ pandas
 numpy
 yfinance
 requests
+# Optional: for advanced optimization
+scipy>=1.10.0
+scikit-learn>=1.3.0
+
+# Optional: for plotting (if needed)
+matplotlib>=3.7.0

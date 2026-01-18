@@ -682,88 +682,126 @@
     // ============================================
     // 數據更新函數
     // ============================================
-    function updateMetricCards(data) {
-        // Price
-        const price = parseFloat(data.close) || 0;
-        document.getElementById('price').textContent = '$' + price.toFixed(2);
-        
-        const change = parseFloat(data.change_pct) || 0;
-        const changeEl = document.getElementById('priceChange');
-        changeEl.innerHTML = `<span class="${change >= 0 ? 'positive' : 'negative'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</span>`;
-        
-        // Score
-        const score = parseFloat(data.total_score) || 0;
-        document.getElementById('score').textContent = score.toFixed(1) + '/10';
-        
-        // Regime
-        const regime = data.regime || 'neutral';
-        const regimeMap = {
-            'offense': { text: '🟢 進攻模式', class: 'regime-offense' },
-            'neutral': { text: '🟡 中性觀望', class: 'regime-neutral' },
-            'defense': { text: '🔴 防禦模式', class: 'regime-defense' }
-        };
-        const regimeInfo = regimeMap[regime] || regimeMap.neutral;
-        document.getElementById('regime').innerHTML = `<span class="regime-badge ${regimeInfo.class}">${regimeInfo.text}</span>`;
-        
-        // VIX
-        const vix = parseFloat(data.vix) || 0;
-        document.getElementById('vix').textContent = vix.toFixed(2);
-        
-        const vixChange = parseFloat(data.vix_change_pct) || 0;
-        const vixChangeEl = document.getElementById('vixChange');
-        vixChangeEl.innerHTML = `<span class="${vixChange <= 0 ? 'positive' : 'negative'}">${vixChange >= 0 ? '▲' : '▼'} ${Math.abs(vixChange).toFixed(1)}%</span>`;
-        
-        // 10Y
-        const us10y = parseFloat(data.us10y) || 0;
-        document.getElementById('us10y').textContent = us10y.toFixed(2) + '%';
-        
-        // Allocation
-        const qqqPct = parseFloat(data.qqq_pct) || 0;
-        const cashPct = parseFloat(data.cash_pct) || 0;
-        const qqqAmount = parseFloat(data.qqq_amount) || 0;
-        const cashAmount = parseFloat(data.cash_amount) || 0;
-        
-        document.getElementById('qqqPct').textContent = qqqPct + '%';
-        document.getElementById('cashPct').textContent = cashPct + '%';
-        document.getElementById('qqqAmount').textContent = '$' + qqqAmount.toLocaleString();
-        document.getElementById('cashAmount').textContent = '$' + cashAmount.toLocaleString();
-        
-        // Stop Loss
-        const stopLoss = parseFloat(data.stop_loss) || (price * 0.98);
-        document.getElementById('stopLoss').textContent = '$' + stopLoss.toFixed(2);
-        
-        // Last Update
-        if (data.created_at) {
-            const date = new Date(data.created_at);
-            document.getElementById('lastUpdate').textContent = date.toLocaleString('zh-TW');
-        }
-    }
-
-function updateFactorScores(factorScores) {
-    const container = document.getElementById('factorList');
+// 更新 Metric Cards
+function updateMetricCards(data) {
+    console.log('📊 Updating metric cards with data:', data);
     
-    console.log('Factor Scores received:', factorScores); // Debug
+    // Price
+    const price = parseFloat(data.close) || 0;
+    document.getElementById('price').textContent = '$' + price.toFixed(2);
+    
+    const change = parseFloat(data.change_pct) || 0;
+    const changeEl = document.getElementById('priceChange');
+    changeEl.innerHTML = `<span class="${change >= 0 ? 'positive' : 'negative'}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</span>`;
+    
+    // Score
+    const score = parseFloat(data.total_score) || 0;
+    document.getElementById('score').textContent = score.toFixed(1) + '/10';
+    
+    // Regime
+    const regime = data.regime || 'neutral';
+    const regimeMap = {
+        'offense': { text: '🟢 進攻模式', class: 'regime-offense' },
+        'neutral': { text: '🟡 中性觀望', class: 'regime-neutral' },
+        'defense': { text: '🔴 防禦模式', class: 'regime-defense' }
+    };
+    const regimeInfo = regimeMap[regime] || regimeMap.neutral;
+    document.getElementById('regime').innerHTML = `<span class="regime-badge ${regimeInfo.class}">${regimeInfo.text}</span>`;
+    
+    // VIX
+    const vix = parseFloat(data.vix) || 0;
+    document.getElementById('vix').textContent = vix.toFixed(2);
+    
+    const vixChange = parseFloat(data.vix_change_pct) || 0;
+    const vixChangeEl = document.getElementById('vixChange');
+    vixChangeEl.innerHTML = `<span class="${vixChange <= 0 ? 'positive' : 'negative'}">${vixChange >= 0 ? '▲' : '▼'} ${Math.abs(vixChange).toFixed(1)}%</span>`;
+    
+    // 10Y
+    const us10y = parseFloat(data.us10y) || 0;
+    document.getElementById('us10y').textContent = us10y.toFixed(2) + '%';
+    
+    // Allocation
+    const qqqPct = parseFloat(data.qqq_pct) || 0;
+    const cashPct = parseFloat(data.cash_pct) || 0;
+    const qqqAmount = parseFloat(data.qqq_amount) || 0;
+    const cashAmount = parseFloat(data.cash_amount) || 0;
+    
+    document.getElementById('qqqPct').textContent = qqqPct + '%';
+    document.getElementById('cashPct').textContent = cashPct + '%';
+    document.getElementById('qqqAmount').textContent = '$' + qqqAmount.toLocaleString();
+    document.getElementById('cashAmount').textContent = '$' + cashAmount.toLocaleString();
+    
+    // Stop Loss
+    const stopLoss = parseFloat(data.stop_loss) || (price * 0.98);
+    document.getElementById('stopLoss').textContent = '$' + stopLoss.toFixed(2);
+    
+    // Last Update
+    if (data.created_at || data.date) {
+        const dateStr = data.created_at || data.date;
+        const date = new Date(dateStr);
+        document.getElementById('lastUpdate').textContent = date.toLocaleString('zh-TW');
+    }
+}
+
+// 更新因子評分 - 加強版
+function updateFactorScores(data) {
+    console.log('🎯 Raw data received:', data);
+    
+    const container = document.getElementById('factorList');
+    if (!container) {
+        console.error('❌ Factor list container not found');
+        return;
+    }
+    
+    // 📌 嘗試多種方式獲取 factor_scores
+    let factorScores = null;
+    
+    // 方式1: 直接從 data.factor_scores
+    if (data.factor_scores) {
+        factorScores = data.factor_scores;
+        console.log('✓ Found factor_scores in data.factor_scores');
+    }
+    // 方式2: 從 data.scoring.factor_scores
+    else if (data.scoring && data.scoring.factor_scores) {
+        factorScores = data.scoring.factor_scores;
+        console.log('✓ Found factor_scores in data.scoring.factor_scores');
+    }
+    // 方式3: 從 data.market_data
+    else if (data.market_data && data.market_data.factor_scores) {
+        factorScores = data.market_data.factor_scores;
+        console.log('✓ Found factor_scores in data.market_data.factor_scores');
+    }
+    
+    console.log('📊 Factor scores to process:', factorScores);
+    console.log('📊 Type:', typeof factorScores);
     
     if (!factorScores) {
-        container.innerHTML = '<p style="color: var(--text-muted);">無數據</p>';
+        console.warn('⚠️ No factor_scores found in data');
+        container.innerHTML = '<p style="color: var(--text-muted); padding: 20px; text-align: center;">無因子評分數據<br><small>請確認 Python 端是否正確發送 factor_scores</small></p>';
         return;
     }
     
     // Parse if string
     let scores = factorScores;
     if (typeof factorScores === 'string') {
+        console.log('📝 Parsing JSON string...');
         try { 
-            scores = JSON.parse(factorScores); 
+            scores = JSON.parse(factorScores);
+            console.log('✓ Parsed successfully:', scores);
         } catch(e) { 
-            console.error('Failed to parse factor scores:', e);
-            container.innerHTML = '<p style="color: var(--text-muted);">數據格式錯誤</p>';
+            console.error('❌ Failed to parse factor scores:', e);
+            console.error('❌ Raw string:', factorScores);
+            container.innerHTML = '<p style="color: var(--red); padding: 20px; text-align: center;">數據格式錯誤<br><small>' + e.message + '</small></p>';
             return; 
         }
     }
     
-    // 支援兩種數據格式
-    // 格式1: { price_momentum: { score: 8, direction: "bullish" }, ... }
-    // 格式2: { price_momentum: 8, volume: 7, ... }
+    // 檢查是否為空對象
+    if (typeof scores === 'object' && Object.keys(scores).length === 0) {
+        console.warn('⚠️ Factor scores is empty object');
+        container.innerHTML = '<p style="color: var(--text-muted); padding: 20px; text-align: center;">因子評分為空</p>';
+        return;
+    }
     
     const factorNames = {
         'price_momentum': '價格動能',
@@ -791,7 +829,11 @@ function updateFactorScores(factorScores) {
     const scoreValues = [];
     const labels = [];
     
+    console.log('🔄 Processing factors...');
+    
     Object.entries(scores).forEach(([factor, data]) => {
+        console.log(`  Processing ${factor}:`, data);
+        
         // 取得分數（支援兩種格式）
         let score = 5;
         if (typeof data === 'object' && data !== null) {
@@ -803,6 +845,8 @@ function updateFactorScores(factorScores) {
         const name = factorNames[factor] || factor;
         const color = colors[factor] || 'var(--blue)';
         const width = (score / 10) * 100;
+        
+        console.log(`  ✓ ${name}: ${score}/10 (${width}%)`);
         
         html += `
             <div class="factor-item">
@@ -819,99 +863,20 @@ function updateFactorScores(factorScores) {
     });
     
     if (html === '') {
-        container.innerHTML = '<p style="color: var(--text-muted);">無因子數據</p>';
+        console.warn('⚠️ No HTML generated from factors');
+        container.innerHTML = '<p style="color: var(--text-muted); padding: 20px; text-align: center;">無法生成因子評分</p>';
         return;
     }
     
+    console.log(`✓ Generated HTML for ${labels.length} factors`);
     container.innerHTML = html;
     
     // Update Radar Chart
+    console.log('📊 Updating radar chart with:', labels, scoreValues);
     updateRadarChart(labels, scoreValues);
 }
 
-function updateRadarChart(labels, scores) {
-    const canvas = document.getElementById('radarChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    if (radarChart) {
-        radarChart.destroy();
-        radarChart = null;
-    }
-    
-    if (!labels || labels.length === 0) {
-        console.log('No data for radar chart');
-        return;
-    }
-    
-    radarChart = new Chart(ctx, {
-        type: 'radar',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: '評分',
-                data: scores,
-                backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                borderColor: 'rgba(59, 130, 246, 1)',
-                borderWidth: 2,
-                pointBackgroundColor: 'rgba(59, 130, 246, 1)',
-                pointBorderColor: '#fff',
-                pointHoverBackgroundColor: '#fff',
-                pointHoverBorderColor: 'rgba(59, 130, 246, 1)',
-                pointRadius: 4,
-                pointHoverRadius: 6
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    min: 0,
-                    max: 10,
-                    beginAtZero: true,
-                    ticks: { 
-                        stepSize: 2,
-                        color: '#6b7280',
-                        backdropColor: 'transparent',
-                        font: { size: 10 }
-                    },
-                    grid: { 
-                        color: 'rgba(255,255,255,0.1)',
-                        circular: true
-                    },
-                    angleLines: {
-                        color: 'rgba(255,255,255,0.1)'
-                    },
-                    pointLabels: { 
-                        color: '#9ca3af',
-                        font: { size: 11 }
-                    }
-                }
-            },
-            plugins: { 
-                legend: { display: false },
-                tooltip: {
-                    backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                    titleColor: '#f9fafb',
-                    bodyColor: '#f9fafb',
-                    borderColor: 'rgba(255,255,255,0.1)',
-                    borderWidth: 1,
-                    padding: 10,
-                    displayColors: false,
-                    callbacks: {
-                        label: function(context) {
-                            return context.parsed.r + '/10';
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
-
-// 在 refreshData 函數中添加更詳細的錯誤處理
+// 主要刷新函數
 async function refreshData() {
     const btn = document.getElementById('refreshBtn');
     btn.disabled = true;
@@ -920,6 +885,8 @@ async function refreshData() {
     showLoading();
     
     try {
+        console.log('🔄 Fetching data from API...');
+        
         // Fetch all data in parallel
         const [latest, history, weeklyReviews, validations] = await Promise.all([
             fetchAPI('latest'),
@@ -934,20 +901,21 @@ async function refreshData() {
             })
         ]);
         
-        console.log('Latest data:', latest); // Debug
+        console.log('✓ Latest data received:', latest);
+        console.log('✓ History data received:', Array.isArray(history) ? `${history.length} records` : history);
         
-        if (latest.error) throw new Error(latest.error);
+        if (latest.error) {
+            throw new Error(latest.error);
+        }
         
         // Update all components
+        console.log('📊 Updating UI components...');
+        
         updateMetricCards(latest);
         
-        // 特別處理 factor_scores
-        if (latest.factor_scores) {
-            console.log('Updating factor scores with:', latest.factor_scores);
-            updateFactorScores(latest.factor_scores);
-        } else {
-            console.warn('No factor_scores in latest data');
-        }
+        // 特別處理 factor_scores - 使用完整的 latest 對象
+        console.log('🎯 Processing factor scores...');
+        updateFactorScores(latest);
         
         if (Array.isArray(history)) {
             updatePriceChart(history);
@@ -958,9 +926,10 @@ async function refreshData() {
         updateValidationStats(validations);
         
         showContent();
+        console.log('✅ Dashboard updated successfully');
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('❌ Error during refresh:', error);
         showError(error.message || '無法連接到伺服器');
     } finally {
         btn.disabled = false;

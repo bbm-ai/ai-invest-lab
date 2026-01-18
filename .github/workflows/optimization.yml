@@ -1,9 +1,9 @@
-name: QQQ Parameter Optimization
+name: QQQ Parameter Optimization (Fixed)
 
 on:
   # 每月第一個週六執行
   schedule:
-    - cron: '0 10 1-7 * 6'  # UTC 10:00 on first Saturday of month
+    - cron: '0 10 1-7 * 6'
   
   # 允許手動觸發
   workflow_dispatch:
@@ -30,6 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -66,6 +67,7 @@ jobs:
           echo "**Date:** $(date)" >> optimization_report.md
           echo "**Strategy:** ${{ github.event.inputs.strategy || 'all' }}" >> optimization_report.md
           echo "**Days:** ${{ github.event.inputs.days || '60' }}" >> optimization_report.md
+          echo "**Dry Run:** ${{ github.event.inputs.dry_run || 'false' }}" >> optimization_report.md
           echo "" >> optimization_report.md
           
           if [ -f "optimization_results.json" ]; then
@@ -74,17 +76,13 @@ jobs:
             cat optimization_results.json >> optimization_report.md
             echo '```' >> optimization_report.md
           fi
-      
-      - name: 💾 Commit updated parameters
-        if: ${{ github.event.inputs.dry_run != 'true' && success() }}
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
           
           if [ -f "optimized_params.json" ]; then
-            git add optimized_params.json
-            git commit -m "🤖 Auto-update optimized parameters - $(date +'%Y-%m-%d')" || echo "No changes to commit"
-            git push || echo "Nothing to push"
+            echo "" >> optimization_report.md
+            echo "## Updated Parameters" >> optimization_report.md
+            echo '```json' >> optimization_report.md
+            cat optimized_params.json >> optimization_report.md
+            echo '```' >> optimization_report.md
           fi
       
       - name: 💾 Upload optimization results
@@ -99,32 +97,89 @@ jobs:
             optimization_report.md
           retention-days: 90
       
-      - name: 📋 Create Pull Request (for review)
+      - name: 📋 Create Pull Request
         if: ${{ github.event.inputs.dry_run != 'true' && success() }}
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: 'Update optimized parameters'
-          title: '🤖 Optimized Parameters Update - ${{ github.run_number }}'
+          commit-message: '🤖 Update optimized parameters'
+          committer: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+          author: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+          branch: optimization-${{ github.run_number }}
+          delete-branch: true
+          title: '🤖 Parameter Optimization Results - Run ${{ github.run_number }}'
           body: |
-            ## 參數優化結果
+            ## 🎯 參數優化結果
             
-            **執行時間:** ${{ github.run_number }}
-            **策略:** ${{ github.event.inputs.strategy || 'all' }}
-            **回測天數:** ${{ github.event.inputs.days || '60' }}
+            ### 📊 執行資訊
+            - **Workflow Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - **策略:** ${{ github.event.inputs.strategy || 'all' }}
+            - **回測天數:** ${{ github.event.inputs.days || '60' }}
+            - **執行時間:** $(date +'%Y-%m-%d %H:%M:%S')
             
-            ### 變更內容
-            - 更新 `optimized_params.json`
+            ### 📁 變更檔案
+            - `optimized_params.json` - 更新的最佳參數
+            - `optimization_report.md` - 詳細優化報告
             
-            ### 後續步驟
-            1. 查看優化結果
-            2. 驗證參數合理性
-            3. 合併此 PR 以採用新參數
+            ### ✅ 後續步驟
+            1. 📥 下載 [Artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) 查看完整結果
+            2. 📖 閱讀 `optimization_report.md` 了解優化詳情
+            3. 🧪 測試新參數：`python qqq_analyzer.py --show-params`
+            4. ✅ 確認無誤後合併此 PR
+            5. 📈 觀察策略表現數天
+            
+            ### ⚠️ 注意事項
+            - 合併前請確認參數合理性
+            - 建議先在測試環境驗證
+            - 可以修改參數後再提交
             
             ---
-            *此 PR 由 GitHub Actions 自動生成*
-          branch: optimization-update-${{ github.run_number }}
-          delete-branch: true
+            🤖 *此 Pull Request 由 GitHub Actions 自動生成*
           labels: |
             optimization
             automated
+            needs-review
+          draft: false
+          add-paths: |
+            optimized_params.json
+            optimization_report.md
+      
+      - name: 💬 Post summary comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 🎯 優化完成\n\n';
+            
+            try {
+              if (fs.existsSync('optimization_report.md')) {
+                const report = fs.readFileSync('optimization_report.md', 'utf8');
+                comment += report;
+              }
+            } catch (e) {
+              comment += '無法讀取優化報告';
+            }
+            
+            // 如果是 PR，在 PR 上留言
+            if (context.payload.pull_request) {
+              github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: comment
+              });
+            }
+      
+      - name: 🚨 Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d chat_id="${TELEGRAM_CHAT_ID}" \
+              -d text="❌ *參數優化失敗*%0A%0AWorkflow: ${{ github.workflow }}%0ARun: ${{ github.run_number }}%0A%0A🔗 [查看詳情](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+              -d parse_mode="Markdown"
+          fi

@@ -1,67 +1,82 @@
 name: QQQ Daily Analysis
 
 on:
+  # 每天美股收盤後執行 (UTC 21:30 = 美東 16:30 或 17:30，視夏令時間而定)
   schedule:
-    - cron: '15 21 * * 1-5'
+    - cron: '30 21 * * 1-5'  # 週一到週五
+  
+  # 允許手動觸發
   workflow_dispatch:
     inputs:
-      mode:
-        description: '執行模式'
-        required: false
-        default: 'analysis'
-        type: choice
-        options:
-          - analysis
-          - validate
-          - weekly
-          - all
       strategy:
-        description: '交易策略'
+        description: '策略名稱 (default, ma20)'
         required: false
         default: 'default'
-        type: choice
-        options:
-          - default
-          - ma20
+      mode:
+        description: '執行模式 (daily, all, validate)'
+        required: false
+        default: 'daily'
 
 jobs:
-  analyze:
+  daily-analysis:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements.txt
-      - name: Run Analysis
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: 📊 Run daily analysis
         env:
           GAS_URL: ${{ secrets.GAS_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STRATEGY: ${{ github.event.inputs.strategy || 'default' }}
+          RISK_PREFERENCE: ${{ secrets.RISK_PREFERENCE || 'neutral' }}
         run: |
-          MODE="${{ github.event.inputs.mode || 'analysis' }}"
-          STRATEGY="${{ github.event.inputs.strategy || secrets.STRATEGY || 'default' }}"
-          
-          echo "📊 執行模式: $MODE"
-          echo "📈 交易策略: $STRATEGY"
-          
-          case $MODE in
-            validate) 
-              python qqq_analyzer.py --validate 
-              ;;
-            weekly) 
-              python qqq_analyzer.py --weekly 
-              ;;
-            all) 
-              python qqq_analyzer.py --strategy $STRATEGY --all 
-              ;;
-            *) 
-              python qqq_analyzer.py --strategy $STRATEGY 
-              ;;
-          esac
-      - uses: actions/upload-artifact@v4
+          if [ "${{ github.event.inputs.mode }}" == "all" ]; then
+            python qqq_analyzer.py --all
+          elif [ "${{ github.event.inputs.mode }}" == "validate" ]; then
+            python qqq_analyzer.py --validate
+          else
+            python qqq_analyzer.py --strategy $STRATEGY
+          fi
+      
+      - name: 💾 Upload output artifacts
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: results-${{ github.run_number }}
-          path: "*.json"
-          if-no-files-found: ignore
+          name: daily-output-${{ github.run_number }}
+          path: |
+            output.json
+            *.log
+          retention-days: 30
+      
+      - name: 📝 Comment on commit (if triggered by push)
+        if: github.event_name == 'push'
+        uses: peter-evans/commit-comment@v3
+        with:
+          body: |
+            ✅ Daily analysis completed
+            🔗 [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+      
+      - name: 🚨 Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="❌ QQQ Daily Analysis Failed%0A%0AWorkflow: ${{ github.workflow }}%0ARun: ${{ github.run_number }}%0A%0A🔗 https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            -d parse_mode="Markdown"

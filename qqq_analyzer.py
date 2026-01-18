@@ -552,7 +552,15 @@ def run_daily_analysis(strategy_name: str = None):
     
     total_score = score_result['total_score']
     regime = score_result['regime']
+    factor_scores = score_result.get('factor_scores', {})
+    
     print(f"  總分: {total_score}/10")
+    
+    # 📌 重要：打印 factor_scores 以便除錯
+    print(f"\n📊 因子評分詳情:")
+    for factor, data in factor_scores.items():
+        score = data.get('score', 'N/A') if isinstance(data, dict) else data
+        print(f"  • {factor}: {score}")
     
     if strategy_name == 'ma20':
         signal = score_result.get('signal', 'HOLD')
@@ -568,24 +576,50 @@ def run_daily_analysis(strategy_name: str = None):
     
     regime_text = {'offense': '🟢 進攻', 'neutral': '🟡 中性', 'defense': '🔴 防禦'}
     
+    # 📌 確保 factor_scores 被序列化為 JSON 字串
+    factor_scores_json = json.dumps(factor_scores, ensure_ascii=False)
+    
     output = {
         "meta": {"version": "5.0", "generated_at": now.isoformat(), "strategy": strategy_name},
         "date": now.strftime("%Y-%m-%d"),
         "ticker": "QQQ",
         "strategy": strategy_name,
         "market_data": {
-            "close": close, "change_pct": change, "vix": vix,
+            "close": close, 
+            "change_pct": change, 
+            "vix": vix,
             "ma20": technicals.get('ma20'),
             "days_above_ma20": technicals.get('consecutive_days_above_ma20', 0),
             "days_below_ma20": technicals.get('consecutive_days_below_ma20', 0)
         },
         "scoring": {
-            "total_score": total_score, "regime": regime, "signal": score_result.get('signal'),
-            "params_used": score_result.get('params_used', {})
+            "total_score": total_score, 
+            "regime": regime, 
+            "signal": score_result.get('signal'),
+            "params_used": score_result.get('params_used', {}),
+            "factor_scores": factor_scores_json  # 📌 作為 JSON 字串
         },
         "allocation": allocation,
         "prediction": {"next_day_bias": "bullish" if total_score >= 6 else "bearish" if total_score <= 4 else "neutral"},
-        "risk_management": {"stop_loss": {"price": round(close * 0.98, 2)}, "triggered": vix > 40 or change < -4}
+        "risk_management": {
+            "stop_loss": {"price": round(close * 0.98, 2)}, 
+            "triggered": vix > 40 or change < -4
+        },
+        # 📌 同時在頂層也放一份，確保相容性
+        "factor_scores": factor_scores_json,
+        "close": close,
+        "change_pct": change,
+        "vix": vix,
+        "total_score": total_score,
+        "regime": regime,
+        "qqq_pct": allocation['qqq_pct'],
+        "cash_pct": allocation['cash_pct'],
+        "qqq_amount": allocation['qqq_amount'],
+        "cash_amount": allocation['cash_amount'],
+        "stop_loss": round(close * 0.98, 2),
+        "us10y": market_data.get('us10y', {}).get('value', 0),
+        "prediction": "bullish" if total_score >= 6 else "bearish" if total_score <= 4 else "neutral",
+        "next_day_bias": "bullish" if total_score >= 6 else "bearish" if total_score <= 4 else "neutral"
     }
     
     alert_text = "\n\n⚠️ *風控警報！*" if output['risk_management']['triggered'] else ""
@@ -614,18 +648,28 @@ def run_daily_analysis(strategy_name: str = None):
 *評分* | {total_score}/10 {regime_text.get(regime)}
 *配置* | QQQ {allocation['qqq_pct']}% / 現金 {allocation['cash_pct']}%{alert_text}"""
     
+    # 📌 打印要發送的數據以便除錯
+    print(f"\n📤 準備發送數據:")
+    print(f"  • factor_scores 長度: {len(factor_scores_json)} 字元")
+    print(f"  • factor_scores 預覽: {factor_scores_json[:100]}...")
+    
     with open('output.json', 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
     
     print("\n📤 發送到 Google Sheets...")
-    GASClient.send('daily_log', output)
+    result = GASClient.send('daily_log', output)
+    
+    # 📌 檢查發送結果
+    if result.get('success'):
+        print(f"  ✅ 成功發送")
+    else:
+        print(f"  ❌ 發送失敗: {result.get('error', 'Unknown error')}")
     
     print("\n📱 發送通知...")
     TelegramNotifier.send(output['notification'])
     
     print("\n✅ 每日分析完成！")
     return output
-
 
 # ============================================
 # 每日驗證 & 週末覆盤（略，與 v4 相同）

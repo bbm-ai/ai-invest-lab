@@ -36,6 +36,46 @@ backups/
 release_*.zip*
 release_*.sha256
 
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text eol=lf
+*.pyw text eol=lf
+*.pyx text eol=lf
+
+# JSON files
+*.json text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Configuration files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+requirements.txt text eol=lf
+
+# Explicitly declare files as binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Documents
+*.doc binary
+*.docx binary
+*.xls binary
+*.xlsx binary
+
 # Raw market/news data (generated locally)
 data/prices/
 data/news/

@@ -867,7 +867,31 @@ Alpha: {alpha:+.2f}%
         traceback.print_exc()
         return None
 
-
+def check_alerts(data):
+    """檢查並發送告警"""
+    alerts = []
+    
+    # VIX 過高
+    if data['vix'] > 30:
+        alerts.append(f"⚠️ VIX 過高: {data['vix']:.1f}")
+    
+    # 評分過低
+    if data['total_score'] < 3.5:
+        alerts.append(f"🔴 評分過低: {data['total_score']:.1f}/10")
+    
+    # 大幅下跌
+    if data['change_pct'] < -2.5:
+        alerts.append(f"📉 大幅下跌: {data['change_pct']:.2f}%")
+    
+    # 連續虧損
+    if data.get('consecutive_losses', 0) >= 3:
+        alerts.append(f"⚠️ 連續虧損 {data['consecutive_losses']} 天")
+    
+    # 發送告警
+    if alerts:
+        message = "🚨 *系統告警*\n\n" + "\n".join(alerts)
+        TelegramNotifier.send(message)
+        
 # ============================================
 # 主程式
 # ============================================

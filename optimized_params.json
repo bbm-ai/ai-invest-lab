@@ -1,73 +1,22 @@
 {
   "meta": {
-    "last_updated": "2026-01-18T22:44:00.863785",
-    "last_backtest_weeks": 10,
-    "version": "2.0",
-    "optimization_days": 20,
-    "optimization_results": {
-      "ma20": {
-        "params": {
-          "days_threshold": 1,
-          "vix_limit": 30,
-          "position_weight": 0.4,
-          "trend_weight": 0.35,
-          "vix_weight": 0.25
-        },
-        "metrics": {
-          "total_return": 0.33,
-          "benchmark_return": 2.13,
-          "alpha": -1.8,
-          "sharpe_ratio": 1.29,
-          "max_drawdown": 0.7,
-          "final_nav": 10033074.29,
-          "days": 19
-        }
-      },
-      "default": {
-        "weights": {
-          "price_momentum": 0.1,
-          "volume": 0.1,
-          "vix": 0.1,
-          "bond": 0.35,
-          "mag7": 0.3500000000000001
-        },
-        "metrics": {
-          "total_return": 0.41,
-          "benchmark_return": 2.13,
-          "alpha": -1.71,
-          "sharpe_ratio": 1.29,
-          "max_drawdown": 0.87,
-          "final_nav": 10041217.56,
-          "days": 19
-        }
-      }
-    }
+    "last_updated": "2026-01-18",
+    "environment": "production"
   },
   "ma20": {
-    "days_threshold": 1,
-    "vix_limit": 30,
-    "position_weight": 0.4,
-    "trend_weight": 0.35,
-    "vix_weight": 0.25
+    "days_threshold": 2,
+    "vix_limit": 35,
+    "position_weight": 0.50,
+    "trend_weight": 0.30,
+    "vix_weight": 0.20
   },
   "default": {
     "weights": {
-      "price_momentum": 0.1,
-      "volume": 0.1,
-      "vix": 0.1,
-      "bond": 0.35,
-      "mag7": 0.3500000000000001
-    },
-    "backtest_result": {
-      "total_return": 2.79,
-      "qqq_return": 4.32,
-      "alpha": -1.53,
-      "sharpe_ratio": 2.41,
-      "max_drawdown": 2.47,
-      "win_rate": 57.5,
-      "profit_loss_ratio": 1.08,
-      "accuracy": 88.9,
-      "total_trades": 9
+      "price_momentum": 0.30,
+      "volume": 0.10,
+      "vix": 0.30,
+      "bond": 0.15,
+      "mag7": 0.15
     }
   }
 }

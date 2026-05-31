@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-24T05:57:22.114872",
+    "last_updated": "2026-05-31T06:13:40.950278",
     "environment": "production",
     "last_backtest_weeks": 10
   },
@@ -11,15 +11,15 @@
     "trend_weight": 0.4,
     "vix_weight": 0.1,
     "backtest_result": {
-      "total_return": 17.79,
-      "qqq_return": 25.05,
-      "alpha": -7.26,
-      "sharpe_ratio": 7.85,
+      "total_return": 21.14,
+      "qqq_return": 26.36,
+      "alpha": -5.21,
+      "sharpe_ratio": 9.43,
       "max_drawdown": 2.43,
-      "win_rate": 70.0,
-      "profit_loss_ratio": 1.56,
-      "accuracy": 68.4,
-      "total_trades": 38
+      "win_rate": 72.5,
+      "profit_loss_ratio": 1.77,
+      "accuracy": 67.5,
+      "total_trades": 40
     }
   },
   "default": {
@@ -31,15 +31,15 @@
       "mag7": 0.15
     },
     "backtest_result": {
-      "total_return": 14.03,
-      "qqq_return": 25.05,
-      "alpha": -11.02,
-      "sharpe_ratio": 7.9,
+      "total_return": 15.82,
+      "qqq_return": 26.36,
+      "alpha": -10.53,
+      "sharpe_ratio": 9.3,
       "max_drawdown": 1.67,
-      "win_rate": 70.0,
-      "profit_loss_ratio": 1.55,
-      "accuracy": 73.3,
-      "total_trades": 15
+      "win_rate": 72.5,
+      "profit_loss_ratio": 1.82,
+      "accuracy": 64.3,
+      "total_trades": 14
     }
   }
 }

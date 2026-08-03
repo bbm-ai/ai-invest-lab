@@ -1,3 +1,13 @@
+# Optimization Report
+
+**Date:** Mon Aug  3 12:54:28 UTC 2026
+**Strategy:** all
+**Days:** 60
+**Dry Run:** false
+
+
+## Updated Parameters
+```json
 {
   "meta": {
     "last_updated": "2026-08-03T12:54:26.612930",
@@ -70,4 +80,4 @@
       "total_trades": 6
     }
   }
-}
+}```
